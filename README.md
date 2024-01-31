@@ -30,7 +30,7 @@ The basics of window switching are easy to understand, but why is CmdTab *the be
 - Big readable app icons
 - ~~Click an app icon with the mouse to switch to that app (WIP!)~~
 - Smart key capture so keys don't unexpected bleed through to other apps
-- Wrap bump is hard to explain but easy to feel: Try holding Alt-Tab until the end, then press Tab again (while Alt is still down)--works in reverse, too!
+- Wrap bump is hard to explain but easy to feel: Try holding Alt-Tab until the end, then press Tab again (while Alt is still down)—works in reverse, too!
 - When cycling windows of the same app, cancel and return to the initial window by pressing Escape (while Alt is still down). This doesn't override or block Windows' native Alt-Escape hotkey
 - Press Q (while Alt is still down) to close the selected application (by closing all its windows)
 - Press W or F4 (while Alt is still down) to close the selected window
@@ -45,6 +45,6 @@ That's a lot of useful stuff, and the code is so small! Go read it, and learn so
   You can press as fast as you can, even if you don't see anything on screen!
   It's not the UI that decides which window you switch to, it's the keyboard keys you press.
   The UI just pops up to give you a visual representation of what's gonna happen.
-  (The UI doesn't pop up if you Alt-Tab super quickly--that's the whole point of delayed show) 
+  (The UI doesn't pop up if you Alt-Tab super quickly—that's the whole point of delayed show) 
 [^3]: Don't worry, there is absolutely no delay in the actual switching, it's instant—switching is actually completely independent of the switcher UI. Only *showing the visual UI* is delayed by a couple of milliseconds, to avoid wasting precious (brain and CPU-) cycles by showing up, confusing you, only to instantly disappear again[^4].
 [^4]: Omg why is this so hard to explain
