@@ -124,6 +124,8 @@ struct gdi {
 
 // Global Windows API handles
 
+static void *hMutexHandle;
+
 static void *hMainInstance;
 
 static void *hMainWindow;
@@ -163,7 +165,7 @@ static void defaults(config_t *config) {
         .key2 = MapVirtualKeyW(0x29, MAPVK_VSC_TO_VK_EX),
         .switch_apps = true,
         .switch_windows = true,
-        .wrap_bump = true,
+        .wrap_bump = false,
         //.fast_switching = false, // BUG / TODO Doesn't work. Have to find a way to show windows without changing their Z-Order (i.e. "previewing" them)
         .ignore_minimized = false, // NOTE Currently only observed for subwindow switching and BUG! Move ignore_minimized handling from show() -> selectnext()
         .show_delay = 150,
@@ -185,7 +187,6 @@ static bool once(void) { // aka. init()?
     }
 }
 
-
 static void print(wchar_t *fmt, ...) {
     // TODO #ifdef this away for release builds
     va_list argp;
@@ -200,7 +201,8 @@ static void print(wchar_t *fmt, ...) {
 static title_t title(void *hwnd) {
     // sizeof: I'm sorry but that's just how you do it in C. BUG / TODO Wait, does size need -1 here?
     title_t title = {
-        .length = sizeof ((title_t *)0)->text / sizeof ((title_t *)0)->text[0], 
+        //.length = MIN(sizeof ((title_t *)0)->text / sizeof ((title_t *)0)->text[0], GetWindowTextLengthW(hwnd)) + 1, // Size [in characters!]. +1 for NUL
+        .length = sizeof ((title_t *)0)->text / sizeof ((title_t *)0)->text[0],
         .text = {0},
         .ok = {0}
     };
@@ -369,7 +371,6 @@ static void *icon(wchar_t *path, void *hwnd) {
     IImageList_Release(piml);
     return hico;
     /*
-    */
     // Above is icon from module path
     // Below is icon from hwnd
     //HWND hwnd;
@@ -385,6 +386,7 @@ static void *icon(wchar_t *path, void *hwnd) {
     if (hico = LoadIconW(NULL, IDI_APPLICATION)) return hico;
     // Alternative: Get the first icon from the main module (executable image of the process)
     if (hico = LoadIconW((HINSTANCE)GetWindowLongPtrW(hwnd, GWLP_HINSTANCE), MAKEINTRESOURCEW(0))) return hico; // BUG Doesn't work?
+    */
 }
 
 
@@ -392,7 +394,7 @@ static int width(windows_t *windows) {
     // TODO Duuude, let's not do it this way. Figure out something better
     int width = 64;
     int hor = 16;
-    int count =  0;
+    int count = 0;
 
     linked_window_t *window = &windows->array[0]; // windows->array[0] is always a top window because it is necessarily the first window of its app in the list
     while (window) {
@@ -423,8 +425,8 @@ static void gdi_init(gdi_t *gdi, void *hwnd) {
     gdi->width = rect.right - rect.left;
     gdi->height = rect.bottom - rect.top;
 
-    DeleteDC(gdi->hdc);
     DeleteObject(gdi->hbm);
+    DeleteDC(gdi->hdc);
 
     HDC hdc = GetDC(hwnd);
     gdi->hdc = CreateCompatibleDC(hdc);
@@ -444,7 +446,7 @@ static void gdi_redraw(gdi_t *gdi, void *hwnd) {
 #define ICON_WIDTH 64
 #define ROUNDED 10
     // TODO Create a 'style_t' type
-    // TODO This is a mess atm. Working just fine, just not looking too good. FIX!
+    // TODO This is a mess atm. Working sorta fine, with some leaks I imagine, and looking rather terrible. FIX!
 
     gdi_init(gdi, hwnd);
 
@@ -529,7 +531,6 @@ static void gdi_redraw(gdi_t *gdi, void *hwnd) {
         rc.left = hor + center - (width / 2) - width; // - width means make the rect wider to the left
         rc.right = hor + center + (width / 2) + width; // + width means make the rect wider to the right
 
-
         linked_window_t *top1 = first(window, false);
         linked_window_t *top2 = first(selection.window, false);
 
@@ -555,7 +556,7 @@ static void gdi_redraw(gdi_t *gdi, void *hwnd) {
             //LOGFONT logfont;
             //GetObject(hFont, sizeof(LOGFONT), &logfont);
 
-            SelectObject(gdi->hdc, GetStockObject(DEFAULT_GUI_FONT)); // TODO / BUG Leaks, I believe? Have to capture and release return value when selecting object?
+            SelectObject(gdi->hdc, GetStockObject(DEFAULT_GUI_FONT)); // TODO / BUG Leaks, I believe? Have to capture and later release return value when selecting object?
             //SelectObject(gdi->hdc, GetFont(L"Microsoft Sans Serif", 15));
             SetTextColor(gdi->hdc, TEXT_COLOR);
             //SetBkColor(gdi->hdc, RGB(200, 200, 200));
@@ -582,20 +583,24 @@ static void show(void *hwnd, bool restore) {
     // Restore from minimized if requested && neccessary
     if (restore && IsIconic(hwnd)) { // TODO Remove this comment? TODO Add config var to ignore minimized windows?? Nah...
         BOOL windowWasPreviouslyVisible = ShowWindow(hwnd, SW_RESTORE);
-        //SetForegroundWindow(hwnd);
-         
-        //SetFocus(hMainWindow);
-        //SetForegroundWindow(hMainWindow);
         /* dbg */ print(L"show (restore)\n");
     } else {
-
-        SetForegroundWindow(hwnd);
-        //ShowWindow(hwnd, SW_SHOW);
-
-        //SetFocus(hMainWindow);
-        //SetForegroundWindow(hMainWindow);
         /* dbg */ print(L"show\n");
     }
+
+    // TODO / BUG / HACK! 
+    // Oof, the rabbit hole...
+    // There are rules for which processes can set the foreground window. See docs.
+    // Sending an Alt key event allows us to circumvent limitations on SetForegroundWindow(). 
+    // I believe (?!) that the real reason we need this hack as per the current implementation, is that we are technically
+    // calling cycle() (which calls show(), which calls SetForegroundWindow()) *from the low level keyboard hook* and not
+    // from our window thread (?), and the low level keyboard hook is not considered a foreground process.
+    // I haven't tested this yet, but I believe the more correct implementation would be to SendMessageW() from the LLKBDH
+    // to our window and call cycle() et al. from our window's WndProc. I think this more correct implementation is rather
+    // trivial to set up, but I can't be bothered right now. So, Alt key hack it is.
+    keybd_event(VK_MENU, 0x38, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0);
+
+    SetForegroundWindow(hwnd);
 }
 /*
 static void peek(void *hwnd) { //
@@ -609,7 +614,6 @@ static void peek(void *hwnd) { //
 }
 */
 static void toggle(bool show, unsigned delay) {
-
     // Toggle hMainWindow visibility (our switcher window/UI)
     // 'delay' allows quick switching without flickering UI
     // (We don't support delayed hiding (why would we?))
@@ -634,8 +638,8 @@ static void toggle(bool show, unsigned delay) {
         int x = GetSystemMetrics(SM_CXSCREEN) / 2 - (w / 2);
         int y = GetSystemMetrics(SM_CYSCREEN) / 2 - (h / 2);
         SetWindowPos(hMainWindow, HWND_TOPMOST, x, y, w, h, SWP_SHOWWINDOW);
-        //SetForegroundWindow(hMainWindow);
         //SetFocus(hMainWindow);
+        //SetForegroundWindow(hMainWindow);
         //ShowWindow(hMainWindow, SW_SHOW);
     } else {
         ShowWindow(hMainWindow, SW_HIDE);
@@ -713,14 +717,15 @@ static bool filter(void *hwnd) {
         return false;
     }
     
-    //WINDOWPLACEMENT placement = {0};
-    //bool success = GetWindowPlacement(hwnd, &placement);
-    //RECT rect = placement.rcNormalPosition;
-    //int width = rect.right - rect.left;
-    //int height = rect.bottom - rect.top;
-    //int size = width + height;
-    //if (size < 100) // window is less than 100 pixels
-        //return false;
+    WINDOWPLACEMENT placement = {0};
+    /* bool */ success = GetWindowPlacement(hwnd, &placement);
+    RECT rect = placement.rcNormalPosition;
+    int width = rect.right - rect.left;
+    int height = rect.bottom - rect.top;
+    int size = width + height;
+    if (size < 100) { // window is less than 100 pixels
+        return false;
+    }
         
     /* Raymond Chen - Which windows appear in the Alt+Tab list?
     // Start at the root owner
@@ -739,17 +744,16 @@ static bool filter(void *hwnd) {
     return true;
 }
 
-static void add(void *hwnd, void *context) {
+static bool add(void *hwnd, void *context) {
     if (filter(hwnd)) {
         windows_t *windows = (windows_t *)context;
 
         path_t exe_path = filepath(hwnd);
-
         if (!exe_path.ok) {
             // IMPORTANT! Although there are comments elsewhere that the 'exe_path' field is just for dbg'ing here we use it to avoid adding
             //            problematic windows/processes to the window list, and fail gracefully by simply excluding them from the switcher.
             print(L"whoops, bad exe path?! %p\n", hwnd);
-            return;
+            return true; // Return true to continue EnumWindows() (to which add() is a callback)
         }
         
         path_t exe_name = filename(exe_path.text, false);
@@ -797,6 +801,7 @@ static void add(void *hwnd, void *context) {
         //* dbg */ print(L"- ");
         //* dbg */ print(L"%s \"%s\" - %s\n", exe_name.text, title.text, exe_path.text);
     }
+    return true; // Return true to continue EnumWindows() (to which add() is a callback)
 }
 
 static void link(windows_t *windows) {
@@ -806,7 +811,7 @@ static void link(windows_t *windows) {
     // We're starting from scratch so go get y'all windows
     windows->count = 0;
     //* dbg */ print(L"EnumWindows (all windows) (+ means Alt-Tab window, - means not Alt-Tab window)\n");
-    EnumWindows((WNDENUMPROC)add, (LPARAM)windows);
+    EnumWindows(add, windows);// (WNDENUMPROC)add, (LPARAM)windows);
     // Are there windows to link?
     if (windows->count < 2) {
         return;
@@ -840,7 +845,7 @@ static void link(windows_t *windows) {
                 // TODO remove this dbg'ing
                 /* dbg */ HWND owner1 = GetWindow(window1->hwnd, GW_OWNER);
                 /* dbg */ HWND owner2 = GetAncestor(window1->hwnd, GA_ROOTOWNER);
-                /* dbg */ if (owner1 != NULL != owner2) {
+                /* dbg */ if (owner1 != NULL && owner2 != NULL) {
                 /* dbg */     //debug();
                 /* dbg */ }
                 while (window1->next_sub_window) { window1 = window1->next_sub_window; } // Get last subwindow of window1 (since window1 is a top window)
@@ -1250,7 +1255,7 @@ static intptr_t LowLevelKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam
     //      This means that we let all "Alt keydown"s pass through our hook, even the "Alt keydown" that the user pressed right before
     //      pressing Tab, which is sort of "ours", but we passed it through anyways (can't consume it after-the-fact).
     //      The result is that there is a hanging "Alt down" that got passed to the foreground app which needs an "Alt keyup", or
-    //      the Alt key gets stuck. Thus, we always pass through "Alt keyup"s, even if we our app used it for some functionality.
+    //      the Alt key gets stuck. Thus, we always pass through "Alt keyup"s, even if we used it for some functionality.
     //      In short:
     //      1) Our app never hooks Alt keydowns
     //      2) Our app hooks Alt keyups, but always passes it through on pain of getting a stuck Alt key because of point 1
@@ -1277,7 +1282,7 @@ static intptr_t LowLevelKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam
     if (selection.active && ((mod1_held || mod2_held) && (keyF4_down || keyQ_down))) {
         if (keyF4_down) {
             print(L"F4\n");
-            SendMessage(hMainWindow, WM_CLOSE, 0, 0);
+            SendMessageW(hMainWindow, WM_CLOSE, 0, 0);
         }
         if (keyQ_down) {
             print(L"Q\n");
@@ -1306,9 +1311,13 @@ static intptr_t WndProc(void *hwnd, unsigned message, intptr_t wParam, intptr_t 
     switch (message) {
         case WM_CREATE: {
             defaults(&config);
-            //gdi_init(&gdi, hwnd);
+            //wipe(&windows);
             //link(&windows);
             //dump(&windows, false); // dbg
+            //select_foreground(&selection);
+            //gdi_init(&gdi, hwnd);
+            //gdi_redraw(&gdi, hwnd);
+            //SendMessageW(hwnd, WM_PAINT, 0, 0);
             return 0;
         }
         /*
@@ -1395,17 +1404,76 @@ static intptr_t WndProc(void *hwnd, unsigned message, intptr_t wParam, intptr_t 
     //return 0;
 }
 
+static bool is_single_instance() {
+    hMutexHandle = CreateMutexW(NULL, true, L"CmdTabSingleton"); // com.stianhoiland.cmdtab.mutex
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        return false;
+    } else {
+        return true;
+    }
+}
+
+static void prompt_autorun() {
+    
+    // Assemble the filepath value for the autorun reg key
+
+    wchar_t exe_path[MAX_PATH]; // path
+    
+    wchar_t target[MAX_PATH*2]; // path + args
+    
+    wchar_t *args = L"--silent";
+
+    GetModuleFileNameW(NULL, exe_path, sizeof exe_path / sizeof *exe_path);
+
+    StringCchPrintfW(target, sizeof target / sizeof *target, L"\"%s\" %s", exe_path, args); // "sprintf"
+
+    // To create a reg key:
+    // RegCreateKeyExW - it will open or create the key
+    // RegSetValueExW
+    // RegCloseKey
+
+    // To delete a reg key:
+    // RegOpenKeyExW
+    // RegDeleteValueW 
+    // RegCloseKey
+
+    HKEY reg_key;
+    wchar_t *reg_key_path = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    wchar_t *reg_key_name = L"CmdTab";
+
+    LSTATUS success;
+
+    int result = MessageBoxW(NULL, L"Start cmdtab.exe automatically? (Relaunch cmdtab.exe to change your mind.)", L"cmdtab", MB_YESNO | MB_ICONQUESTION | MB_TASKMODAL);
+
+    switch (result) {
+        case IDYES: {
+            print(L"Adding startup reg key\n");
+            success = RegCreateKeyExW(HKEY_CURRENT_USER, reg_key_path, 0, NULL, 0, KEY_SET_VALUE, NULL, &reg_key, NULL); // ERROR_SUCCESS
+            success = RegSetValueExW(reg_key, reg_key_name, 0, REG_SZ, target, sizeof target); // ERROR_SUCCESS
+            success = RegCloseKey(reg_key);
+            break;
+        }
+        case IDNO: {
+            print(L"Removing startup reg key\n");
+            success = RegOpenKeyExW(HKEY_CURRENT_USER, reg_key_path, 0, KEY_ALL_ACCESS, &reg_key); // ERROR_SUCCESS
+            success = RegDeleteValueW(reg_key, reg_key_name); // ERROR_SUCCESS, ERROR_FILE_NOT_FOUND
+            success = RegCloseKey(reg_key);
+            break;
+        }
+    }
+}
+
 // Forward declarations of Windows procs
 
 //static intptr_t CALLBACK LowLevelKeyboardProc(int, intptr_t, intptr_t);
 
 //static intptr_t CALLBACK WndProc(void *, unsigned, intptr_t, intptr_t);
 
-int APIENTRY wWinMain(void *, void *, wchar_t *, int);
+//int APIENTRY wWinMain(void *, void *, wchar_t *, int);
 
 // Windows API main()
 
-int wWinMain(void *hInstance, void *hPrevInstance, wchar_t *lpCmdLine, int nCmdShow) {
+int APIENTRY wWinMain(void *hInstance, void *hPrevInstance, wchar_t *lpCmdLine, int nCmdShow) {
 
     //AllocConsole();
     //void *hConsoleOutput = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -1413,6 +1481,30 @@ int wWinMain(void *hInstance, void *hPrevInstance, wchar_t *lpCmdLine, int nCmdS
     //int len;
     //WriteConsoleW(hConsoleOutput, wszBuffer, sizeof(wszBuffer)/sizeof(wchar_t), &len, NULL);
     OutputDebugStringW(L"Ẅęļçǫɱę ťỡ ûňîĉôɗě\n");
+
+    // Quit if CmdTab is already running
+    if (!is_single_instance()) {
+        /* dbg */ print(L"ERROR cmdtab is already running.\n");
+        MessageBoxW(NULL, L"cmdtab.exe is already running.", L"cmdtab", MB_OK | MB_ICONINFORMATION | MB_TASKMODAL);
+        ExitProcess(0);
+    } else {
+    }
+
+    // Don't prompt about autorun if we got passed "--silent" (which the actual autorun call passes)
+    if (wcscmp(lpCmdLine, L"--silent") != 0) {
+        prompt_autorun();
+    } else {
+        /* dbg */ print(L"got --silent\n");
+        /* dbg */ MessageBoxW(NULL, L"Started cmdtab.exe automatically. (This is a harmless debugging message and should have been disabled for release versions.)", L"cmdtab", MB_OK | MB_ICONINFORMATION | MB_TASKMODAL);
+    }
+
+
+    // https://stackoverflow.com/a/70693198/659310
+    //#include <dwmapi.h>
+    BOOL USE_DARK_MODE = true; // See below: SET_IMMERSIVE_DARK_MODE_SUCCESS
+    
+    HBRUSH hbrBackground = USE_DARK_MODE ? (HBRUSH)(CreateSolidBrush(RGB(32, 32, 32))) : (HBRUSH)(COLOR_WINDOW + 1); // Can't seem to remove the initial light window background flicker...
+
 
     WNDCLASSEX wcex = {0};
 
@@ -1431,7 +1523,7 @@ int wWinMain(void *hInstance, void *hPrevInstance, wchar_t *lpCmdLine, int nCmdS
     wcex.hIconSm = LoadIconW(hInstance, IDI_APPLICATION); // "small.ico"
     wcex.hCursor = LoadCursorW(NULL, IDC_ARROW);
 
-    wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); //CreateSolidBrush(RGB(0, 0, 0)), //{0}, //GetStockObject(HOLLOW_BRUSH), // {0}, //(HBRUSH)(COLOR_WINDOW + 1),
+    wcex.hbrBackground = hbrBackground;
 
     wcex.lpszMenuName  = NULL;
     wcex.lpszClassName = L"CMDTAB";
@@ -1441,7 +1533,7 @@ int wWinMain(void *hInstance, void *hPrevInstance, wchar_t *lpCmdLine, int nCmdS
     HWND hWnd = CreateWindowExW(
         WS_EX_TOOLWINDOW, // Maybe include WS_EX_TOPMOST // "WS_EX_TOOLWINDOW" is excluded in ALT-TAB according to docs, yay!
         class, //wcex.lpszClassName,
-        L"", // No title bar text
+        NULL, // No title bar text
         0,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
@@ -1452,27 +1544,34 @@ int wWinMain(void *hInstance, void *hPrevInstance, wchar_t *lpCmdLine, int nCmdS
         hInstance,
         NULL
     );
+
+    BOOL SET_IMMERSIVE_DARK_MODE_SUCCESS = SUCCEEDED(DwmSetWindowAttribute(hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &USE_DARK_MODE, sizeof(USE_DARK_MODE)));
+
+    //SendMessageW(hWnd, WM_PAINT, 0, 0); // Can't seem to remove the initial light window background flicker...
+
     // This removes the window title bar, window shadow and window shape rounding
     //SetWindowLongPtrW(hMainWindow, GWL_STYLE, GetWindowLongPtrW(hMainWindow, GWL_STYLE) & ~WS_CAPTION);
 
 
+
     hMainInstance = hInstance;
     hMainWindow = hWnd;
-    hKeyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, (HOOKPROC)LowLevelKeyboardProc, hInstance, 0);
+    hKeyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, (HOOKPROC)LowLevelKeyboardProc, NULL, 0); // NULL | hInstance | GetModuleHandleW(NULL)
 
-    // https://stackoverflow.com/a/70693198/659310
-    //#include <dwmapi.h>
-    BOOL USE_DARK_MODE = true;
-    BOOL SET_IMMERSIVE_DARK_MODE_SUCCESS = SUCCEEDED(DwmSetWindowAttribute(hMainWindow, DWMWA_USE_IMMERSIVE_DARK_MODE, &USE_DARK_MODE, sizeof(USE_DARK_MODE)));
+    
 
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
+        //TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
 
+
+
     UnhookWindowsHookEx(hKeyboardHook);
-    //hKeyboardHook = NULL;
+
+    ReleaseMutex(hMutexHandle);
+    CloseHandle(hMutexHandle);
 
     return (int)msg.wParam;
 }
