@@ -165,7 +165,7 @@ static void defaults(config_t *config) {
         .key2 = MapVirtualKeyW(0x29, MAPVK_VSC_TO_VK_EX),
         .switch_apps = true,
         .switch_windows = true,
-        .wrap_bump = false,
+        .wrap_bump = true,
         //.fast_switching = false, // BUG / TODO Doesn't work. Have to find a way to show windows without changing their Z-Order (i.e. "previewing" them)
         .ignore_minimized = false, // NOTE Currently only observed for subwindow switching and BUG! Move ignore_minimized handling from show() -> selectnext()
         .show_delay = 150,
