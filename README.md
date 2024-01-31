@@ -30,9 +30,8 @@ The basics of window switching are easy to understand, but why is CmdTab *the be
 - Big readable app icons
 - ~~Click an app icon with the mouse to switch to that app (WIP!)~~
 - Smart key capture so keys don't unexpected bleed through to other apps
-- Wrap stop/bump is hard to explain but easy to feel: Try holding Alt-Tab until the end, then press Tab again (while Alt is still down)--works in reverse, too!
-- When cycling windows of the same app, return back to the window you started at by pressing Escape (while Alt is still down)
-This doesn't override or block Windows' native Alt-Escape hotkey
+- Wrap bump is hard to explain but easy to feel: Try holding Alt-Tab until the end, then press Tab again (while Alt is still down)--works in reverse, too!
+- When cycling windows of the same app, cancel and return to the initial window by pressing Escape (while Alt is still down). This doesn't override or block Windows' native Alt-Escape hotkey
 - Press Q (while Alt is still down) to close the selected application (by closing all its windows)
 - Press W or F4 (while Alt is still down) to close the selected window
 - Delayed show[^2] prevents the switcher from indecipherably flashing and disappearing when all you wanted was to instantly Alt-Tab *once* to get back to the previous app[^3].
