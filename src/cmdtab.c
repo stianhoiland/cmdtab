@@ -42,15 +42,14 @@ void *hKeyboardHook;
 void *hMainWnd;
 
 // Forward declarations of functions included in this code module
-intptr_t CALLBACK WndProc(void *, unsigned int, intptr_t, intptr_t);
+intptr_t CALLBACK WndProc(void*, unsigned int, intptr_t, intptr_t);
 intptr_t CALLBACK LowLevelKeyboardProc(int, intptr_t, intptr_t);
 
-intptr_t CALLBACK About(void *, unsigned int, intptr_t, intptr_t);
 
-int APIENTRY wWinMain(void *, void *, wchar_t *, int);
+int APIENTRY wWinMain(void*, void*, wchar_t*, int);
 
-int APIENTRY wWinMain(void *hInstance, void *hPrevInstance, wchar_t *lpCmdLine, int nCmdShow) {
-
+int wWinMain(void *hInstance, void *hPrevInstance, wchar_t *lpCmdLine, int nCmdShow) {
+    
     //UNREFERENCED_PARAMETER(hPrevInstance);
     //UNREFERENCED_PARAMETER(lpCmdLine);
 
@@ -64,10 +63,10 @@ int APIENTRY wWinMain(void *hInstance, void *hPrevInstance, wchar_t *lpCmdLine, 
     // Initialize global strings
     //wchar_t szTitle[MAX_LOADSTRING]; // the title bar text
     wchar_t szWindowClass[MAX_LOADSTRING]; // the main window class name
-
+    
     //LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
     LoadStringW(hInstance, IDC_CMDTAB4, szWindowClass, MAX_LOADSTRING);
-
+    
     // Register the window class
     /*
     WNDCLASSEXW wcex = {0};
@@ -83,23 +82,23 @@ int APIENTRY wWinMain(void *hInstance, void *hPrevInstance, wchar_t *lpCmdLine, 
     wcex.lpszMenuName = MAKEINTRESOURCEW(IDC_CMDTAB4);
     wcex.lpszClassName = szWindowClass;
     wcex.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_SMALL));
-
+    
     RegisterClassExW(&wcex);
     */
-
+    
     unsigned short class = RegisterClassExW(&(WNDCLASSEXW) {
         .cbSize = sizeof(WNDCLASSEX),
-            .style = CS_HREDRAW | CS_VREDRAW,
-            .lpfnWndProc = WndProc,
-            .cbClsExtra = 0,
-            .cbWndExtra = 0,
-            .hInstance = hInstance,
-            .hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_CMDTAB4)),
-            .hCursor = LoadCursorW(NULL, IDC_ARROW),
-            .hbrBackground = (HBRUSH)(COLOR_WINDOW + 1),
-            .lpszMenuName = MAKEINTRESOURCEW(IDC_CMDTAB4),
-            .lpszClassName = szWindowClass,
-            .hIconSm = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_SMALL))
+        .style = CS_HREDRAW | CS_VREDRAW,
+        .lpfnWndProc = WndProc,
+        .cbClsExtra = 0,
+        .cbWndExtra = 0,
+        .hInstance = hInstance,
+        .hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_CMDTAB4)),
+        .hCursor = LoadCursorW(NULL, IDC_ARROW),
+        .hbrBackground = (HBRUSH)(COLOR_WINDOW+1),
+        .lpszMenuName = MAKEINTRESOURCEW(IDC_CMDTAB4),
+        .lpszClassName = szWindowClass,
+        .hIconSm = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_SMALL))
     });
     if (class == 0) {
         return false;
@@ -118,8 +117,8 @@ int APIENTRY wWinMain(void *hInstance, void *hPrevInstance, wchar_t *lpCmdLine, 
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         */
-        GetSystemMetrics(SM_CXSCREEN) / 2 - (w / 2),
-        GetSystemMetrics(SM_CYSCREEN) / 2 - (h / 2),
+        GetSystemMetrics(SM_CXSCREEN)/2 - (w/2),
+        GetSystemMetrics(SM_CYSCREEN)/2 - (h/2),
         w,
         h,
         NULL,
@@ -145,27 +144,14 @@ int APIENTRY wWinMain(void *hInstance, void *hPrevInstance, wchar_t *lpCmdLine, 
         return false;
     }
 
-    /*
-    int success = RegisterHotKey(hMainWnd, 1, MOD_ALT | MOD_NOREPEAT, VK_OEM_5); // alt + VK_OEM_5   N: 0x4E
-    if (!success) {
-        return false;
-    }
-    success = RegisterHotKey(hMainWnd, 2, MOD_ALT | MOD_NOREPEAT, VK_TAB); // alt + VK_OEM_5   N: 0x4E
-    if (!success) {
-        return false;
-    }
-    */
-
-
-
-
+    
     // Main message loop
     void *hAccelTable = LoadAcceleratorsW(hInstance, MAKEINTRESOURCEW(IDC_CMDTAB4));
-    MSG msg;
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        if (!TranslateAcceleratorW(msg.hwnd, hAccelTable, &msg)) {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+    MSG message;
+    while (GetMessageW(&message, NULL, 0, 0)) {
+        if (!TranslateAcceleratorW(message.hwnd, hAccelTable, &message)) {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
         }
     }
 
@@ -175,77 +161,134 @@ int APIENTRY wWinMain(void *hInstance, void *hPrevInstance, wchar_t *lpCmdLine, 
     }
     hKeyboardHook = NULL;
 
-    return (int)msg.wParam;
+    return (int)message.wParam;
 }
 
-#include <wchar.h>
-#include <stdarg.h>
+#pragma comment(lib, "shlwapi.lib") 
+#pragma comment(lib, "dwmapi.lib") 
 
-void DebugOut(wchar_t *fmt, ...) {
-    va_list argp;
-    va_start(argp, fmt);
-    wchar_t dbg_out[4096];
-    vswprintf_s(dbg_out, 4096, fmt, argp);
-    va_end(argp);
-    OutputDebugStringW(dbg_out);
-}
-
-
-
-
-
-
+#include <wchar.h> // We're wiiiide, baby!
+#include <stdarg.h> // Used by print()
+#include "debugapi.h" // Used by print()
+#include "WinUser.h" // Used by title(), path(), filter(), collect(), next()
+#include "processthreadsapi.h" // Used by path()
+#include "WinBase.h" // Used by path()
+#include "handleapi.h" // Used by path()
+#include "Shlwapi.h" // Used by name()
+//#include "corecrt_wstring.h" // Used by name(), included by wchar.h
+#include "dwmapi.h" // Used by filter()
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
 
-// function to reverse a string
-/*
-void wcsrev(wchar_t *wstr, int len) {
-    // if the string is empty
-    if (!wstr) {
-        return;
-    }
-    // pointer to start and end at the string
-    int i = 0;
-    int j = len ? len : strlen(wstr)-1;
-
-    // reversing string
-    while (i<j) {
-        wchar_t c = wstr[i];
-        wstr[i] = wstr[j];
-        wstr[j] = c;
-        i++;
-        j--;
-    }
-}
-*/
-
-/* Just a useful little thing to avoid dealing with buffers just to debug print a window's title */
+typedef struct path path_t;
 typedef struct title title_t;
+//typedef struct link link_t;
+typedef struct linked_window linked_window_t;
+typedef struct windows windows_t;
+typedef struct keyboard keyboard_t;
+typedef struct config config_t;
+typedef struct selection selection_t;
+
 struct title {
-    int length;
-    wchar_t text[MAX_PATH];
+    int length; // GetWindowTextW() wants 'int'
+    wchar_t text[(MAX_PATH*2)+1];
     bool ok;
 };
-title_t title(HWND hwnd) {
+
+struct path {
+    unsigned long length; // QueryFullProcessImageNameW() wants 'unsigned long'
+    wchar_t text[MAX_PATH+1];
+    bool ok;
+};
+
+/*
+struct link {
+    linked_window_t *previous;
+    linked_window_t *next;
+};
+*/
+
+struct linked_window {
+    path_t exe_name; // dbg
+    title_t title; // dbg
+    void *hwnd;
+    //link_t apps; // Only top windows have this link set. See link() for a definition of "top window"
+    //link_t subwindows; // These are windows of the same app (i.e. same exe_path), called "sub windows"
+    linked_window_t *next_sub_window;
+    linked_window_t *prev_sub_window;
+    linked_window_t *next_top_window; // Only top windows have these
+    linked_window_t *prev_top_window; // Only top windows have these
+    path_t exe_path; // dbg: Not strictly needed to be stored in memory, could just query & compare at point of need (in link()), but it's nice to have available for printwindowing while debugging
+};
+
+// App state
+
+struct windows {
+    linked_window_t array[256];
+    int count;
+};
+
+struct keyboard {
+    char keys[32]; // 32x char = 256 bits. Could use CHAR_BIT for correctness, but does Windows (8, I believe is our earliest target) even run on any machine where CHAR_BIT != 8?
+};
+
+struct config { // See defaults() for notes
+    // bindings in vkcode
+    unsigned long mod1;
+    unsigned long key1;
+    unsigned long mod2;
+    unsigned long key2;
+    // options
+    bool fast_switching; // BUG / TODO Doesn't work. Have to find a way to show windows without changing their Z-Order (i.e. "previewing" them)
+    bool ignore_minimized; // Currently only observed for subwindow switching and BUG! Move ignore_minimized handling from show() -> selectnext()
+};
+
+struct selection {
+    linked_window_t *app;
+    linked_window_t *subwindow;
+    linked_window_t *restore;
+    bool switching;
+};
+
+
+// Global variables for app state. Yes we could throw these into a 'struct app', but that encourages passing around too much context
+
+static windows_t windows;// = {0}; // Filtered windows, as returned by EnumWindows() and filtered by filter()
+
+static keyboard_t keyboard;// = {0};
+
+static config_t config;// = {0};
+
+static selection_t selection;// = {0};
+
+
+static void print(wchar_t *fmt, ...) {
+    va_list argp;
+    va_start(argp, fmt);
+    wchar_t wcs[4096];
+    vswprintf_s(wcs, 4096, fmt, argp);
+    va_end(argp);
+    OutputDebugStringW(wcs);
+}
+
+
+static title_t title(void *hwnd) {
     title_t title = {
-        .length = MIN(MAX_PATH - 1, GetWindowTextLengthW(hwnd)),
+        .length = MIN((MAX_PATH * 2), GetWindowTextLengthW(hwnd)),
         .text = {0},
         .ok = false
     };
-    title.ok = GetWindowTextW(hwnd, title.text, title.length) > 0;
+    title.ok = GetWindowTextW(hwnd, &title.text, title.length + 1) > 0; // +1 bcoz: "The maximum number of characters to copy to the buffer, including the null character." (docs)
     return title;
 }
 
-
-typedef struct path path_t;
-struct path {
-    unsigned long length;
-    wchar_t text[MAX_PATH];
-    bool ok;
-};
-path_t path(HWND hwnd) {
+static path_t path(void *hwnd) {
+    path_t path = {
+        .length = MAX_PATH, // NOTE: Used as buffer size (in) and path length (out) by QueryFullProcessImageNameW()
+        .text = {0},
+        .ok = false
+    };
     //
     // How to get the file path of the executable for the process that owns the window:
     // 
@@ -253,123 +296,131 @@ path_t path(HWND hwnd) {
     // 2. OpenProcess() for access to remote process memory
     // 3. QueryFullProcessImageNameW() [Windows Vista] to get full "executable image" name (i.e. exe path) for process
     //
-
-    // Return result
-    path_t path = {
-        .length = MAX_PATH, // Used as buffer size (in) and path length (out) by QueryFullProcessImageNameW()
-        .text = {0},
-        .ok = false
-    };
-
     unsigned long pid;
     GetWindowThreadProcessId(hwnd, &pid);
     void *process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid); // See GetProcessHandleFromHwnd()
     if (!process) {
-        DebugOut(L"ERROR couldn't open process for window: %s\n", title(hwnd).text);
+        print(L"ERROR couldn't open process for window: %s\n", title(hwnd).text);
         return path;
     } else {
-        path.ok = QueryFullProcessImageNameW(process, 0, path.text, &path.length); // Can use GetLongPathName() if getting shortened paths
-        if (!path.ok) {
-            DebugOut(L"ERROR couldn't get exe path for window: %s\n", title(hwnd).text);
-            CloseHandle(process);
-            return path;
-        } else {
-            CloseHandle(process);
-            return path;
+        bool success = QueryFullProcessImageNameW(process, 0, path.text, &path.length); // Can use GetLongPathName() if getting shortened paths
+        if (!success) {
+            print(L"ERROR couldn't get exe path for window: %s\n", title(hwnd).text);
+        }
+        CloseHandle(process);
+        path.ok = success;
+        return path;
+    }
+}
+
+static bool patheq(path_t path1, path_t path2) {
+    // Compare paths from last to first char since unique paths nevertheless often have identical prefixes
+    // The normal way would be:
+    //return (path1.length == path2.length && wcscmp(path1.path, path2.path) == 0);
+
+    if (path1.length != path2.length) {
+        return false;
+    }
+    for (int i = path1.length - 1; i >= 0; i--) {
+        if (path1.text[i] != path2.text[i]) {
+            return false;
         }
     }
-}
-bool patheq(path_t path1, path_t path2) {
-    // Compare paths from last to first char since unique paths nevertheless often have identical prefixes
-    if (path1.length != path2.length)
-        return false;
-    for (int i = path1.length - 1; i >= 0; i--) {
-        if (path1.text[i] != path2.text[i])
-            return false;
-    }
     return true;
-    // The normal way would be:
-    //return (path1.length==path2.length&&wcscmp(path1.path, path2.path)==0);
 }
-path_t name(path_t *path) {
-#pragma comment(lib, "shlwapi.lib") // Link to this file.
-#include "shlwapi.h" // for PathFindNextComponent()
-    // Return result
-    path_t result = {
+
+static path_t name(path_t *path) {
+    path_t name = {
         .length = 0,
         .text = {0},
         .ok = true
     };
-    wcscpy_s(&result.text, (rsize_t)MAX_PATH - 1, PathFindFileNameW(&path->text));
-    PathRemoveExtensionW(&result.text); //BUG Deprecated, use PathCchRemoveExtension()
-    result.length = (size_t)wcslen(&result.text);
-    return result;
+    errno_t error = wcscpy_s(&name.text, MAX_PATH, PathFindFileNameW(&path->text)); // BUG Not checking 'error' return
+    PathRemoveExtensionW(&name.text); //BUG Deprecated, use PathCchRemoveExtension()
+    name.length = wcslen(&name.text);
+    return name;
 }
 
 
+static void show(void *hwnd, bool restore/*, bool hide_switcher*/) {
+    // Show window, restore from minimized if neccessary
+    //void *hwnd = window->hwnd;
+    if (restore && IsIconic(hwnd)) {  // TODO Add config switch to ignore minimized windows?? Nah...
+        bool windowGotShown = !ShowWindow(hwnd, SW_RESTORE);
+        SetForegroundWindow(hwnd);
+        print(L"show (restored)\n");
+    } else {
+        SetForegroundWindow(hwnd);
+        print(L"show\n");
+    }
 
-typedef struct linked_window linked_window_t;
-
-struct linked_window {
-    path_t exe_name; // dbg
-    title_t title; // dbg
-    void *window;
-    linked_window_t *next_sub_window;
-    linked_window_t *prev_sub_window;
-    linked_window_t *next_top_window; // only top windows have these
-    linked_window_t *prev_top_window; // only top windows have these
-    path_t exe_path; // dbg: Not strictly needed to be stored in memory, could just query & compare at point of need (in linkwindows()), but it's nice to have available for debugging
-};
-
-// 10.24kb (not counting .exe_path)
-linked_window_t windows[256] = {0};
-
-intptr_t windows_count = 0;
-
-//const struct node NodeNull = {0}; // or just node == (struct node){0}
-
-
-//struct node 
-
-//typedef struct node window;
-
-
-//HWND windows[1024];
-//HWND apps[128];
-//#define MAX_APPS 32
-//#define MAX_WINDOWS 32 // This is per app
-//char exePaths[MAX_APPS][MAX_WINDOWS][MAX_PATH];
-
-/*
-linked_window_t *last_sub_window(linked_window_t *window) {
-    while (window->next_sub_window) { window = window->next_sub_window; }
-    return window;
+    /*
+    // Hide switcher?
+    int switcherGotHidden = ShowWindow(hMainWnd, SW_HIDE);
+    return switcherGotHidden;
+    if (switcherGotHidden) {
+        print(L"hide: alt keyup\n");
+        //return consume_message; // Consume message BUG: Alt key gets stuck if we consume this message, but this also seems to propogate an Alt keydown event to the underlying window?
+    } else {
+        // The hook caught Alt keyup, but the switcher window was already hidden
+        // Since this is a no-op for us, we pass the message on
+        //return CallNextHookEx(NULL, nCode, wParam, lParam);
+    }
+    */
 }
-bool is_top_window(linked_window_t *window)
-void add_sub_window(linked_window_t *window, linked_window_t *sub) {
-    linked_window_t *last = last_sub_window(window);
-    last->next_sub_window = sub;
-    sub->prev_sub_window = last;
-}
-void add_top_window(linked_window_t *window, linked_window_t *top) {
-    window2->prev_top_window = window1;
-    window1->next_top_window = window2;
-}
-*/
 
-bool alttab(void *window) {
+static void peek(void *hwnd) {
+    //
+    // BUG / TODO Doesn't work. Have to find a way to show windows without changing their Z-Order (i.e. "previewing" them)
+    //
+    
+    //bool windowGotShown = !ShowWindow(hwnd, SW_SHOWNA);
+    bool success = SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+
+}
+
+
+static bool filter(void *hwnd) {
+
+    // Window must be visible
     if (IsWindowVisible(hwnd) == false)
         return false;
 
+    // Ignore windows without title text
     //if (GetWindowTextLengthW(hwnd) == 0)
         //return false;
 
-    // Ignore desktop window.
+    // Ignore desktop window
     if (GetShellWindow() == hwnd)
+        return false;
+
+    // Ignore ourselves
+    if (hwnd == hMainWnd) // TODO After nailing down the other filters, test if this is necessary anymore
+        return false;
+
+    int cloaked = 0;
+    int success = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof cloaked); // Windows 8
+    if (success && cloaked)
         return false;
 
     //if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW)
         //return false;
+
+    //if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST)
+        //return false;
+
+    //if (config.ignore_minimized && IsIconic(hwnd))
+        //return false;
+
+    WINDOWPLACEMENT placement = {0};
+    success = GetWindowPlacement(hwnd, &placement);
+    RECT rect = placement.rcNormalPosition;
+    int width = rect.right - rect.left;
+    int height = rect.bottom - rect.top;
+    int size = width + height;
+    if (size < 100) // window is less than 100 pixels
+        return false;
+        
 
     /*
     // Start at the root owner
@@ -387,24 +438,19 @@ bool alttab(void *window) {
 
     return true;
 }
-void addwindow(void *window, void *context) {
-    //wchar_t title[512+1];
-    //GetWindowTextW(hwnd, title, 512);
 
-    if (alttab(window)) {
-        //wchar_t *file_name = PathFindFileNameW(&path.path);
-        //PathRemoveExtensionW(file_name);
+static void add(void *hwnd, void *context) {
+    if (filter(hwnd)) {
+        windows_t *windows = (windows_t *)context;
 
-        //GetWindowTextW(hwnd, title, 512);
-        //DebugOut(L"%s\t\t%s\n", file_name, title);
-
-        //intptr_t *count = (intptr_t *)context;
-        path_t exe_path = path(window);
+        path_t exe_path = path(hwnd);
         path_t exe_name = name(&exe_path);
-        windows[windows_count++] = (linked_window_t){
+        title_t window_title = title(hwnd);
+        
+        windows->array[windows->count++] = (linked_window_t){
             .exe_name = exe_name, // dbg
-            .title = title(window), // dbg
-            .window = window,
+            .title = window_title, // dbg
+            .hwnd = hwnd,
             .next_sub_window = NULL,
             .prev_sub_window = NULL,
             .next_top_window = NULL,
@@ -412,557 +458,561 @@ void addwindow(void *window, void *context) {
             .exe_path = exe_path // dbg. See note in 'struct linked_window' declaration
         };
 
-        return;
-
-        if (windows_count < 2)
-            return;
-
-        linked_window_t *window1 = &windows[windows_count - 2];
-        linked_window_t *window2 = &windows[windows_count - 1];
-
-        bool same_app;
-
-        if (!window1->exe_path.ok || !window2->exe_path.ok) {
-            DebugOut(L"whoops, bad exe paths?!");
-        }
-
-        same_app = patheq(window2->exe_path, window1->exe_path);
-
-        if (same_app) {
-            window2->prev_sub_window = window1;
-            window1->next_sub_window = window2;
-        } else {
-
-        }
-
-
-
-        linked_window_t *app1;
-        linked_window_t *app2;
-
-        // get to top-level app window
-
-        app1 = window1;
-
-        while (app1->prev_sub_window != NULL && !same_app) {
-            app1 = app1->prev_sub_window;
-        }
-
-        // check if any prev apps are same as window2
-
-        app2 = app1;
-
-        while (app2->prev_top_window != NULL && !same_app) {
-            app2 = app2->prev_top_window;
-            same_app = patheq(window2->exe_path, app2->exe_path);
-        }
-
-        if (same_app) {
-            // add to end of this app's windows
-
-            while (app2->next_sub_window != NULL) {
-                app2 = app2->next_sub_window;
-            }
-
-            window2->prev_sub_window = app2;
-            app2->next_sub_window = window2;
-
-        } else {
-            // add to end of apps
-            window2->prev_top_window = app1;
-            app1->next_top_window = window2;
-        }
-
-        // check if any next apps are same as window2
-
-        app2 = app1;
-
-        while (app2->next_top_window != NULL && !same_app) {
-            app2 = app2->next_top_window;
-            same_app = patheq(window2->exe_path, app2->exe_path);
-        }
-
-        if (same_app) {
-            // add to end of this app's windows
-
-            while (app2->next_sub_window != NULL) {
-                app2 = app2->next_sub_window;
-            }
-
-            window2->prev_sub_window = app2;
-            app2->next_sub_window = window2;
-        }
-
-
-
-        //DebugOut(L"+ %s\n", title(hwnd).text);
+        //print(L"+ %s %s\n", exe_name.text, window_title.text);
     } else {
-        //DebugOut(L"- %s\n", title(hwnd).text);
+        //print(L"- %s %s\n", exe_name.text, window_title.text);
     }
 }
-void linkwindows() {
-    // Reset global var
-    windows_count = 0;
-    //DebugOut(L"EnumWindows (all windows) (+ means Alt-Tab window, - means not Alt-Tab window)\n");
-    // Populate 'windows' global var
-    EnumWindows(addwindow, NULL);
-    //EnumWindows(enum_windows_proc, &windows_count);
-    //DebugOut(L"%lld Alt-Tab windows\n", windows_count);
 
-    //wchar_t title[512+1]; // Used for debug print
-    // As a convenience and (very) slight optimization, we return the foreground window (as a linked_window_t, not a HWND)
-    //HWND foreground_window = GetForegroundWindow();
-    //linked_window_t *foreground_linked_window = NULL;
+static void collect(windows_t *windows) {
+    // Names
+    // 'enumerate', 'fetch', 'populate', 'build', 'gather', 'collect', 'addall'
 
-    // BUG So many ways to optimize this:
-    // [ ] Hash the path
-    // [x] Store the path strings reversed so that string comparision start from the last letter of the filename extension and work backwards
-    // [ ] Build a tree with nodes for each path component
-    // Not optimal but fast enough
-    // If two windows have the exact same executable path, then they are counted as windows of the same app
-    // Algo: 
-    //       1. Take window1 and window2
-    //       2. If they are same app AND window1 doesn't already have 'next_sub_window' then:
-    //            window1.next_sub_window = window2
-    //            window2.prev_sub_window = window1
-    //       3. If they are not same app AND window1 is first window of its app in the list (i.e. 'prev_sub_window' == NULL) then:
-    //            window1.next_top_window = window2
-    //            window2.prev_top_window = window1
-    //
+    windows->count = 0;
+    //print(L"EnumWindows (all windows) (+ means Alt-Tab window, - means not Alt-Tab window)\n");
+    EnumWindows(add, windows);
+}
 
-    if (windows_count < 2)
+static void link(windows_t *windows) {
+    if (windows->count < 2) {
         return;
+    }
 
-    // A top window is any window that is the first of its app in the windows list
-    // A sub window is any window of the same app after that
-    for (int i = 1; i < windows_count; i++) {
-        linked_window_t *window1 = &windows[0]; // windows[0] is always a top window because it is necessarily the first window of its app in the list
-        linked_window_t *window2 = &windows[i];
+    //
+    // A top window is the first window of its app in the windows list (the order of the window list is determined by EnumWindows())
+    // A sub window is any window of the same app after its top window
+    // A top window is also counted as its app's first sub window (this is only relevant for first())
+    //
+    // So after setting up links according to these rules, it looks like this: 
+    //
+    //   top_window ←→ top_window ←→ top_window ←→ top_window ←→ ...
+    //        ↑             ↑             ↑
+    //        ↓             ↓             ↓          
+    //   sub_window    sub_window    sub_window      
+    //        ↑
+    //        ↓                                    
+    //   sub_window                                
+    // 
+    for (int i = 1; i < windows->count; i++) {
+        linked_window_t *window1 = &windows->array[0]; // windows->array[0] is always a top window because it is necessarily the first window of its app in the list
+        linked_window_t *window2 = &windows->array[i];
         if (!window1->exe_path.ok || !window2->exe_path.ok) {
-            DebugOut(L"whoops, bad exe paths?!");
+            print(L"whoops, bad exe paths?!");
+            return; // BUG Use assert
         }
-        // Determine if window2 is a) same app as a prior top window (a sub window), or b) first window of its app in the list (a top window)
+        // Determine if window2 is either a) same app as a prior top window (a sub window), or b) first window of its app in the list (a top window)
         while (window1) {
             if (patheq(window1->exe_path, window2->exe_path)) {
-                while (window1->next_sub_window) { window1 = window1->next_sub_window; } // get last sub window
+                while (window1->next_sub_window) { window1 = window1->next_sub_window; } // Get last sub window of window1 (window1 is a top window)
                 window1->next_sub_window = window2;
                 window2->prev_sub_window = window1;
                 break;
             }
-            if (window1->next_top_window == NULL) { // cheeky but works
+            if (window1->next_top_window == NULL) { // Cheeky but works
                 break;
             }
-            window1 = window1->next_top_window; // check next top window
+            window1 = window1->next_top_window; // Check next top window
         }
-        if (window2->prev_sub_window == NULL) {
+        if (window2->prev_sub_window == NULL) { // window2 was not assigned a previous window of the same app, thus it is a top window
             window2->prev_top_window = window1;
             window1->next_top_window = window2;
         }
-
-        continue;
-
-        linked_window_t *window = &windows[i];
-
-        if (!window->exe_path.ok) {
-            DebugOut(L"whoops, bad exe paths?!");
-        }
-        //
-        // windows[0].next_top_window —→ windows[?].next_top_window —→ windows[?].next_top_window —→ windows[?].next_top_window —→ ...
-        //        |                      |                      |                   ↑
-        //        ↓                      ↓                      ↓                   |
-        //  next_sub_window        next_sub_window        next_sub_window     prev_sub_window
-        //                                                      ↑
-        //                                                      |
-        //                                                prev_sub_window
-        // 
-        //
-        // GOD dammit I hate this code, but honest to god I'm not sure there's a better way to
-        // express it in code. It's not very complicated--I promise!--it just *looks* so ugly!
-        // 
-        // Check if the app of the window is already in the app chain (windows[0]->next_top_window->next_top_window->next_top_window...)
-        bool unseen = true;
-        // Start at first window
-        linked_window_t *app = &windows[0];
-        // Is first window and this window same app?
-        if (patheq(app->exe_path, window->exe_path)) {
-            // Yes, so get to end of the app's windows
-            while (app->next_sub_window) {
-                app = app->next_sub_window;
-            }
-            // And link the window there
-            app->next_sub_window = window;
-            window->prev_sub_window = app;
-        } else {
-            // Not same as first window, so check next apps in the app chain
-            while (app->next_top_window) {
-                app = app->next_top_window;
-                // Is next app and window same app?
-                if (patheq(app->exe_path, window->exe_path)) {
-                    // Yes, so get to end of this next app's windows
-                    while (app->next_sub_window) {
-                        app = app->next_sub_window;
-                    }
-                    // And link the window there
-                    app->next_sub_window = window;
-                    window->prev_sub_window = app;
-                    // Stop checking app chain, the window is a sub-window
-                    unseen = false;
-                    break;
-                }
-            }
-            // All apps in app chain have been checked, was the window a sub-window or a top-level window?
-            if (unseen) {
-                // The app of the window was not seen in the app chain, so add it to the end of the app chain
-                app->next_top_window = window;
-                window->prev_top_window = app;
-            }
-        }
     }
-    return;
-
-
-
-
-    return;
-
-    for (int i = 0; i < windows_count - 1; i++) {
-        linked_window_t *window1 = &windows[i];
-        linked_window_t *window2 = &windows[i + 1];
-
-        if (!window1->exe_path.ok || !window2->exe_path.ok) {
-            DebugOut(L"whoops, bad exe paths?!");
-        }
-
-        bool same_app = patheq(window1->exe_path, window2->exe_path);
-
-        if (same_app) {
-            window1->next_sub_window = window2;
-            window2->prev_sub_window = window1;
-        } else {
-            bool window2_is_first_app = true;
-
-            // get to top-level app window
-            while (window1->prev_sub_window != NULL) {
-                window1 = window1->prev_sub_window;
-            }
-            // check previous top-level app windows (apps)
-            while (window1->prev_top_window != NULL) {
-                window1 = window1->prev_top_window;
-
-                bool same_app = patheq(window1->exe_path, window2->exe_path);
-
-                if (same_app) {
-                    break;
-                }
-            }
-        }
-    }
-    /*
-    for (int i = 0; i < windows_count; i++) {
-        //int s = i; // allow skips
-        for (int j = i+1; j < windows_count; j++) {
-            linked_window_t *window1 = &windows[i];
-            linked_window_t *window2 = &windows[j];
-
-            if (!window1->exe_path.ok || !window2->exe_path.ok) {
-                DebugOut(L"whoops, bad exe paths?!");
-            }
-
-            bool same_app = patheq(window1->exe_path, window2->exe_path);
-
-            if (same_app) {
-                if (window1->next_sub_window == NULL) {
-                    window1->next_sub_window = window2;
-                    window2->prev_sub_window = window1;
-                }
-            } else {
-                if (window1->next_top_window == NULL && window1->prev_sub_window == NULL) { // second cond means window1 is first window of its app in the list
-                    window1->next_top_window = window2;
-                    window2->prev_top_window = window1;
-                    //if (s==j)
-                        //s = j;
-                }
-            }
-
-            // window1 is configured, go to next
-            if (window1->next_sub_window != NULL && window1->next_top_window != NULL)
-                break;
-
-            //i = s;
-        }
-        */
-        //windows[0].prev_sub_window
-        //windows[windows_count-1].
-
-        // As a convenience and (very) slight optimization, we return the foreground window (as a linked_window_t, not a HWND)
-        //if (foreground_linked_window == NULL && windows[i].window==foreground_window) {
-            //foreground_linked_window = &windows[i];
-        //}
-
-
-        //wchar_t *file_name = PathFindFileNameW(&path.path);
-        //PathRemoveExtensionW(file_name);
-
-        //GetWindowTextW(hwnd, title, 512);
-        //DebugOut(L"%s\t\t%s\n", file_name, title);
-
-    // Connect first app with last app, creating a cycle
-    for (int j = windows_count - 1; j >= 0; j--) {
-
-    }
-    //DebugOut(L"lol");
-    //return foreground_linked_window;
 }
-void print_windows(bool flat) {
-    DebugOut(L"%lld Alt-Tab windows:\n", windows_count);
-    if (flat) {
-        // just print the array
-        for (int i = 0; i < windows_count; i++) {
-            linked_window_t *window = &windows[i];
-            DebugOut(L"- %s\n", window->title.text);
-        }
-        DebugOut(L"\n");
+
+static void printwindow(wchar_t *prefix, linked_window_t *window) {
+    // TODO Maybe get rid of this function? It just sits so ugly between all these nice functions: add, collect, link, dump, load...
+    if (window) {
+        print(L"%s %s  %s %s\n", prefix ? prefix : L"Window:", window->exe_name.text, window->title.text, window->exe_path.text);
     } else {
-        // print the linked list
-        linked_window_t *window;
-        linked_window_t *subwindow;
-
-        window = &windows[0];
-        subwindow = &windows[0];
-        DebugOut(L"- %s %s\n", window->exe_name.text, window->title.text);
-        while (subwindow->next_sub_window != NULL) {
-            subwindow = subwindow->next_sub_window;
-            DebugOut(L"\t- %s %s\n", subwindow->exe_name.text, subwindow->title.text);
-        }
-
-        window = &windows[0];
-        subwindow = &windows[0];
-        while (window->next_top_window != NULL) {
-            window = window->next_top_window;
-            DebugOut(L"- %s %s\n", window->exe_name.text, window->title.text);
-            while (subwindow->next_sub_window != NULL) {
-                subwindow = subwindow->next_sub_window;
-                DebugOut(L"\t- %s %s\n", subwindow->exe_name.text, subwindow->title.text);
-            }
-        }
-        DebugOut(L"\n");
+        print(L"whoops! window is NULL! %s\n", prefix ? prefix : L"");
     }
 }
-linked_window_t *linked_window(HWND hwnd) {
-    for (int i = 0; i < windows_count; i++) {
-        if (windows[i].window == hwnd) {
-            return &windows[i];
+
+static void dump(windows_t *windows, bool fancy) {
+    double mem = (double)(sizeof * windows + sizeof config + sizeof selection) / 1024; // TODO 'config' and 'selection' are referencing global vars
+    print(L"%i Alt-Tab windows (%.0fkb mem):\n", windows->count, mem);
+    if (!fancy) {
+        // Just dump the array
+        for (int i = 0; i < windows->count; i++) {
+            linked_window_t *window = &windows->array[i];
+            print(L"%i ", i);
+            printwindow(L"", window);
+        }
+    } else {
+        // Dump the linked list
+        linked_window_t *top_window = &windows->array[0]; // windows->array[0] is always a top window because it is necessarily the first window of its app in the list
+        linked_window_t *sub_window = top_window->next_sub_window;
+        while (top_window) {
+            printwindow(L"+", top_window);
+            while (sub_window) {
+                printwindow(L"\t-", sub_window);
+                sub_window = sub_window->next_sub_window;
+            }
+            if (top_window->next_top_window == NULL) {
+                break;
+            }
+            top_window = top_window->next_top_window;
+            sub_window = top_window->next_sub_window;
+        }
+    }
+    print(L"\n");
+}
+
+static void load(windows_t *windows) {
+    // We're starting from scratch so go get y'all windows
+    collect(windows);
+    link(windows);
+    dump(windows, true); // dbg
+}
+
+static linked_window_t *find(windows_t *windows, void *hwnd) {
+    for (int i = 0; i < windows->count; i++) {
+        if (windows->array[i].hwnd == hwnd) {
+            return &windows->array[i];
         }
     }
     return NULL;
 }
-linked_window_t *next_top_window(linked_window_t *window, bool reverse, bool wrap) {
-    // Prepare
-    if (window == NULL) {
-        window = linked_window(GetForegroundWindow());
+
+static linked_window_t *first(linked_window_t *window, bool top) {
+    if (top) { // Could call self (recursion) but looks cleaner this way:
+        while (window->prev_sub_window) { window = window->prev_sub_window; } // 1. Go to top window
+        while (window->prev_top_window) { window = window->prev_top_window; } // 2. Go to first top widndow
+    } else {
+        while (window->prev_sub_window) { window = window->prev_sub_window; } // 1. Go to top window (which is also technically "first sub window")
     }
-    if (window->prev_sub_window) {
-        while (window->prev_sub_window) { window = window->prev_sub_window; }
+    // return window; // WTF How does this work in findnext() without return value!?
+} 
+
+static linked_window_t *last(linked_window_t *window, bool top) {
+    if (top) { // Could use first() but looks cleaner this way:
+        while (window->prev_sub_window) { window = window->prev_sub_window; } // 1. Go to top window
+        while (window->next_top_window) { window = window->next_top_window; } // 2. Go to last top window
+    } else {
+        while (window->next_sub_window) { window = window->next_sub_window; } // 1. Go to last sub window
     }
-    // Cycle forward
-    if (!reverse && window->next_top_window) {
-        return window->next_top_window;
-    }
-    // Cycle backward
-    if (reverse && window->prev_top_window) {
-        return window->prev_top_window;
-    }
-    // Wrap forward
-    if (!reverse && !window->next_top_window && wrap) {
-        DebugOut(L"wrap from %s %s\n", window->exe_name.text, window->title.text);
-        while (window->prev_top_window) { window = window->prev_top_window; }
-        return window;
-    }
-    // Wrap backward
-    if (reverse && !window->prev_top_window && wrap) {
-        DebugOut(L"wrap from %s %s\n", window->exe_name.text, window->title.text);
-        while (window->next_top_window) { window = window->next_top_window; }
-        return window;
-    }
-    // Can be NULL?
-    return window;
+    // return window; // WTF How does this work in findnext() without return value!?
 }
-linked_window_t *next_sub_window(linked_window_t *window, bool reverse, bool wrap) {
-    // Prepare
-    if (window == NULL) {
-        window = linked_window(GetForegroundWindow());
+
+
+// Can't use function name 'next'?? 'after'?!
+// TODO / BUG: Handle NULL window, i.e. there are NO windows to switch to
+static linked_window_t *findnext(linked_window_t *window, bool top, bool reverse, bool wrap) {
+
+    linked_window_t *next_window = NULL; // Could use ternary, but this looks clearer:
+
+    if (top && !reverse) {
+        next_window = window->next_top_window;
     }
-    if (window == NULL) {
-        DebugOut(L"uuh...");
+    if (top && reverse) {
+        next_window = window->prev_top_window;
     }
-    // Cycle forward
-    if (!reverse && window->next_sub_window) {
-        return window->next_sub_window;
+    if (!top && !reverse) {
+        next_window = window->next_sub_window;
     }
-    // Cycle backward
-    if (reverse && window->prev_sub_window) {
-        return window->prev_sub_window;
+    if (!top && reverse) {
+        next_window = window->prev_sub_window;
     }
-    // Wrap forward
-    if (!reverse && !window->next_sub_window && wrap) {
-        DebugOut(L"wrap from %s %s\n", window->exe_name.text, window->title.text);
-        while (window->prev_sub_window) { window = window->prev_sub_window; }
+    
+    if (next_window) {
+        return next_window;
     }
-    // Wrap backward
-    if (reverse && !window->prev_sub_window && wrap) {
-        DebugOut(L"wrap from %s %s\n", window->exe_name.text, window->title.text);
-        while (window->next_sub_window) { window = window->next_sub_window; }
+
+    bool alone;
+
+    if (top) {
+        alone = !window->next_top_window && !window->prev_top_window; // All alone on the top :(
+    } else {
+        alone = !window->next_sub_window && !window->prev_sub_window; // Top looking for sub ;)
     }
-    // Can be NULL?
+
+    if (!next_window && wrap && !alone) {
+        print(L"wrap to %s\n", reverse ? L"last" : L"first");// from %s %s\n", window->exe_name.text, window->title.text);
+        return reverse ? last(window, top) : first(window, top);
+    }
+    // Can't be NULL, or we'll have crashed in this function already (NULL pointer dereference above)
     return window;
+    //return NULL;
+}
+
+
+static void defaults(config_t *config) {
+    //
+    // Note about key2, used for switching sub windows
+    // 
+    // The default key2 is scan code 0x29 (hex) / 41 (decimal)
+    // This is the key that is physically below Esc, left of 1 and above Tab
+    //
+    *config = (config_t){
+        .mod1 = VK_LMENU,
+        .key1 = VK_TAB,
+        .mod2 = VK_LMENU,
+        .key2 = MapVirtualKeyW(0x29, MAPVK_VSC_TO_VK_EX),
+        .fast_switching = false,
+        .ignore_minimized = true
+    };
+}
+
+static void once(void) { // aka. init()?
+    defaults(&config);
+}
+
+
+static void toggle(bool show) {
+    if (show) {
+        int w = 320;
+        int h = 240;
+        int x = GetSystemMetrics(SM_CXSCREEN) / 2 - (w / 2);
+        int y = GetSystemMetrics(SM_CYSCREEN) / 2 - (h / 2);
+        SetFocus(hMainWnd);
+        SetWindowPos(hMainWnd, HWND_TOPMOST, x, y, w, h, SWP_SHOWWINDOW);
+    } else {
+        ShowWindow(hMainWnd, SW_HIDE);
+    }
+}
+
+static bool selectforeground(selection_t *selection, windows_t *windows) {
+    linked_window_t *foreground = find(windows, GetForegroundWindow());
+    selection->app = foreground;
+    selection->subwindow = foreground;
+    selection->restore = foreground;
+    printwindow(L"foreground app:", foreground);
+    return (foreground != NULL);
 }
 
 /*
-void enum_windows() {
-    windows_count = 0; // global var
-    //DebugOut(L"EnumWindows (all windows) (+ means Alt-Tab window, - means not Alt-Tab window)\n");
-    EnumWindows(addwindow, NULL);
-    //EnumWindows(enum_windows_proc, &windows_count);
-    //DebugOut(L"%lld Alt-Tab windows\n", windows_count);
-    linkwindows();
-
-    // map unique indices
-    char *data[20];
-    int i, j, n, unique[20];
-
-    n = 0;
-    for (i = 0; i<20; ++i) {
-        for (j = 0; j<n; ++j) {
-            if (!strcmp(data[i], data[unique[j]]))
-                break;
-        }
-
-        if (j==n)
-            unique[n++] = i;
-    }
-
-}
-void next_window(HWND hwnd, int offset) {
-    linked_window_t next;
-    for (int i = 0; i<windows_count; i++) {
-        if (windows[i].window == hwnd) {
-            next = windows[i];
-            break;
-        }
-    }
-    while (offset--) {
-        next = *next.next_sub_window;
-    }
-    DebugOut(L"%s\n", title(next.window).text);
-}
-void next_top_window(HWND hwnd, int offset) {
-    linked_window_t *next = NULL;
-    for (int i = 0; i<windows_count; i++) {
-        if (windows[i].window==hwnd) {
-            next = &windows[i];
-            break;
-        }
-    }
-    while (offset--) {
-        next = next->next_top_window;
-    }
-    DebugOut(L"%s\n", title(next->hwnd).text);
-}
-
-// https://stackoverflow.com/a/52488331/659310
-void enumWindows(WNDENUMPROC in_Proc, LPARAM in_Param) {
-
-    // get desktop window, this is equivalent to specifying NULL as hwndParent
-    void *desktop_window = GetDesktopWindow();
-
-    // fallback to using FindWindowEx, get first top-level window
-    void *first_window = FindWindowExW(desktop_window, 0, 0, 0);
-
-    // init the enumeration
-    int count = 0;
-    int result = true;
-    void *current_window = first_window;
-
-    // loop through windows found
-    // - since 2012 the EnumWindows API in windows has a problem (on purpose by MS)
-    //   that it does not return all windows (no metro apps, no start menu etc)
-    // - luckally the FindWindowEx() still is clean and working
-    while (current_window && result) {
-        // call the callback
-        if (in_Proc!=NULL) {
-            result = in_Proc(current_window, in_Param);
-        }
-
-        // get next window
-        current_window = FindWindowExW(desktop_window, current_window, 0, 0);
-
-        // protect against changes in window hierachy during enumeration
-        if (current_window == first_window || count++ > 10000)
-            break;
-    }
-
-    DebugOut(L"%i\n", count);
+static void selectnull(selection_t *selection) {
+    selection->restore = NULL;
+    selection->subwindow = NULL;
+    selection->app = NULL;
 }
 */
 
-
-// rename next_top_window        -> next_top_window
-// rename next_sub_window -> next_sub_window
-linked_window_t *top(linked_window_t *window) {
-    return (window->prev_sub_window == NULL);
+/*
+static bool done(bool show, bool restore) {
+    // Restore?
+    if (show && selection.restore) {
+        //show(selection.restore);
+    }
+    // Clear selection state
+    selection = (selection_t){0};
 }
-linked_window_t *bottom(linked_window_t *window) {
 
+static bool cancel(bool restore) {
+    // Restore?
+    if (restore && selection.restore) {
+        show(selection.restore);
+    }
+    // Clear selection state
+    selection = (selection_t){0};
 }
-linked_window_t *first(linked_window_t *window) {
-    if (top(window)) {
-        while (window->prev_top_window) { window = window->prev_top_window; }
-        return window;
+*/
+
+// Can't use function name 'switch' :(
+static bool selectnext(selection_t *selection, bool app, bool reverse, bool wrap) { // bool show? for showing switcher // rename fast to switch? whoops can't, keyword
+    
+    if (!selection->restore) {
+        load(&windows); // Update to current windows and window order
+        if (!selectforeground(selection, &windows)) {
+            return false; // There are no windows (akshually, none of the filtered windows is the foreground window)
+        }
+    }
+
+    if (app) {
+        linked_window_t *next_window = findnext(selection->app, app, reverse, wrap); // TODO / BUG: Handle NULL window, i.e. there are NO windows to switch to
+        if (next_window == selection->app) { return false; } // We did nothing, so let low level hook know to pass the message on
+        selection->app = next_window;
+        selection->subwindow = next_window; // Advance the app that we're (potentially) cycling subwindows for
     } else {
-        while (window->prev_sub_window) { window = window->prev_sub_window; }
-        return window;
+        linked_window_t *next_window = findnext(selection->subwindow, app, reverse, wrap); // TODO / BUG: Handle NULL window, i.e. there are NO windows to switch to
+        if (next_window == selection->subwindow) { return false; } // We did nothing, so let low level hook know to pass the message on
+        selection->subwindow = next_window;
+    }
+
+    return true;
+
+    /*
+    linked_window_t **selected = app ? &selection.app : &selection.subwindow;
+    linked_window_t *next = findnext(*selected, app, reverse, !repeat);
+    if (!next) {
+        return false; // TODO Remove error semantics. This function should be void return. Callers should do other checks to determine if a switch happened
+    }
+    if (*selected != next) {
+        *selected = next;
+
+        if (fast && config.fast_switching) {
+            show((*selected)->hwnd, true);
+        }
+
+        // Show main window // bool show? for showing switcher
+        int windowGotShown = !ShowWindow(hMainWnd, SW_SHOW);
+        if (windowGotShown) {
+            UpdateWindow(hMainWnd); // TODO / BUG: Is this necessary? It's here since the template code included it when showing window
+        }
+        SetForegroundWindow(hMainWnd);
+    }
+    return true;
+    */
+}
+
+static bool mod1key1(selection_t *selection, bool reverse, bool repeat) {
+    if (!selectnext(selection, true, reverse, !repeat)) {
+        // We did nothing, but we'll let the low level hook know to consume the message (return true) (despite what it says in selectnext())
+        // since we "own" the hotkey (whether or not we do anything, i.e. even when we do nothing, nothing *else* should happen--it's our hotkey)
+        return true; 
+    }
+
+    selection->switching = true;
+
+    // GUI stuff:
+    //...
+
+    if (config.fast_switching) {
+        peek(selection->app->hwnd); // Doesn't work yet. See config.fast_switching and peek()
+    } 
+
+    toggle(true);
+    SetWindowTextW(hMainWnd, selection->app->title.text); // dbg
+
+    //show(selection->app->hwnd, true); // mod1 is for app switching. We don't switch immediately onn mod1key1, we switch on mod1up
+
+    print(L"next app%s: %s %s\n", repeat ? L" (repeat)" : L"", selection->app->exe_name.text, selection->app->title.text);
+
+    return true;
+}
+static void mod1up(selection_t *selection) {
+    if (selection->switching) {
+        toggle(false);
+    }
+    if (selection->app && selection->app != selection->restore) { // && !fast_switching
+        show(selection->app->hwnd, true); // mod1 is for app switching. We don't switch immediately onn mod1key1, we switch on mod1up
+    }
+    if (selection->restore) {
+        selection->restore = NULL;
+        selection->subwindow = NULL;
+        selection->app = NULL;
+        //*selection = (selection_t){0};
+        print(L"clear: mod1up\n");
     }
 }
-linked_window_t *root(linked_window_t *window) {
-    if (top(window)) {
-        return first(window);
-    } else {
-        return first(first(window));
+
+static bool mod2key2(selection_t *selection, bool reverse, bool repeat) {
+    if (!selectnext(selection, false, reverse, !repeat)) {
+        // We did nothing, but we'll let the low level hook know to consume the message (return true) (despite what it says in selectnext())
+        // since we "own" the hotkey (whether or not we do anything, i.e. even when we do nothing, nothing *else* should happen--it's our hotkey)
+        return true;
+    }
+
+    //selection->switching = true;
+    //selection->switching = false;
+
+    // GUI stuff:
+    //...
+
+    // mod2 is for subwindow switching. We don't switch on mod2up, we switch immediately on mod2key2
+    show(selection->subwindow->hwnd, config.ignore_minimized); // BUG! Move ignore_minimized handling from show() -> selectnext()
+
+    print(L"next subwindow%s: %s %s\n", repeat ? L" (repeat)" : L"", selection->subwindow->exe_name.text, selection->subwindow->title.text);
+
+    return true; 
+}
+static void mod2up(selection_t *selection) {
+    //if (selection->switching) {
+        //toggle(false);
+    //}
+
+    if (selection->subwindow && selection->subwindow != selection->restore) { // && !fast_switching
+        //show(selection->subwindow->hwnd, true); // mod2 is for subwindow switching. We don't switch on mod2up, we switch immediately on mod2key2
+    }
+    if (selection->restore) {
+        selection->restore = NULL;
+        selection->subwindow = NULL;
+        selection->app = NULL;
+        //*selection = (selection_t){0};
+        print(L"clear: mod2up\n");
     }
 }
-linked_window_t *last(linked_window_t *window) {
-    if (top(window)) {
-        while (window->next_top_window) { window = window->next_top_window; }
-        return window;
+
+static bool mod_esc(selection_t *selection) {
+    
+    // Restore? Not working yet. 'Restore' is part of fast_switching, to restore the original window (or actually the whole Z-Order)
+    //          when cancelling switching while in fast_switching mode
+    //if (config.fast_switching && selection->restore) {
+    //    show(selection.restore, true);
+    //}
+    
+    // Clear selection state
+    if (selection->restore) {
+        selection->restore = NULL;
+        selection->subwindow = NULL;
+        selection->app = NULL;
+        toggle(false); // BUG Refactor out of this condition into a selection->switching condition
+        print(L"cancel: alt+esc\n");
+        return true;
     } else {
-        while (window->next_sub_window) { window = window->next_sub_window; }
-        return window;
+        return false; // We don't "own"/monopolize Alt+Esc, because it's used by the OS for another, rather useful, window switching mechaninsm
     }
+
 }
-linked_window_t *next(linked_window_t *window, bool reverse, bool wrap) {
-    if (top(window)) {
 
+//
+// keyboard->keys
+// 
+// Char-based bitarray, lovely implementation from https://c-faq.com/misc/bitsets.html
+// usage:
+//   char bit_array[BITSIZE(42)]; // gives you 42 bits (+/- CHAR_BIT) to work with
+//   BITSET(bit_array, 69);       // set bit no. 69 to 1
+//   BITCLEAR(bit_array, 420);    // set bit no. 420 to 0
+//   if (BITTEST(bit_array, 666)) // check if bit no. 666 is set to 1
+#include <limits.h>	   /* for CHAR_BIT */
+#define BITSIZE(n)     ((n + CHAR_BIT - 1) / CHAR_BIT)
+#define BITINDEX(b)    ((b) / CHAR_BIT)
+#define BITMASK(b)     (1 << ((b) % CHAR_BIT))
+#define BITSET(a, b)   ((a)[BITINDEX(b)] |=  BITMASK(b))
+#define BITCLEAR(a, b) ((a)[BITINDEX(b)] &= ~BITMASK(b))
+#define BITTEST(a, b)  ((a)[BITINDEX(b)] &   BITMASK(b))
 
-
-    } else {
-
+// Manually track modifier state and key repeat with a bit array (key repeat must be tracked manually in low level hook)
+// vkCode: "The code must be a value in the range 1 to 254." (docs)
+// 256 bits for complete tracking of currently held virtual keys (vkCodes, i.e. VK_* defines).
+// vkCode technically fits in a 'char' (see above), but we'll use the same type as the struct
+static bool setkey(keyboard_t *keyboard, unsigned long vkcode, bool down) {
+    bool already_down = BITTEST(keyboard->keys, vkcode);
+    bool repeat = already_down && down;
+    if (!down) {
+        BITCLEAR(keyboard->keys, vkcode);
     }
+    if (down && !repeat) {
+        BITSET(keyboard->keys, vkcode);
+    }
+    return repeat;
 }
+static bool getkey(keyboard_t *keyboard, unsigned long vkcode) {
+    return BITTEST(keyboard->keys, vkcode);
+}
+
+intptr_t LowLevelKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam) {
+    if (nCode < 0 || nCode != HC_ACTION) { // "If code is less than zero, the hook procedure must pass the message to blah blah blah read the docs"
+        return CallNextHookEx(NULL, nCode, wParam, lParam);
+    }
+
+    // Info about the keyboard for the low level hook
+    KBDLLHOOKSTRUCT *kb = (KBDLLHOOKSTRUCT *)lParam;
+    unsigned long virtual_key = kb->vkCode;
+    bool key_down = !(kb->flags & LLKHF_UP);
+    // Manually track key repeat using 'keyboard->keys' as a bit array (see above)
+    bool key_repeat = setkey(&keyboard, virtual_key, key_down);
+
+    //print(L"virtual_key:%llu\tscanCode:%llu\tdown:%d\trepeat:%d\n", virtual_key, scanCode, bKeyDown, bKeyRepeat);
+
+    // Typically:
+    //  mod1+key1 = Alt+Tab
+    //  mod2+key2 = Alt+` (scancode 0x29)
+    bool shift_held = getkey(&keyboard, VK_LSHIFT); // NOTE: This is the *left* shift key
+    bool mod1_held  = getkey(&keyboard, config.mod1);
+    bool mod2_held  = getkey(&keyboard, config.mod2);
+    bool key1_down   = virtual_key == config.key1 && key_down;
+    bool key2_down   = virtual_key == config.key2 && key_down;
+    bool key1_repeat = key1_down && key_repeat;
+    bool key2_repeat = key2_down && key_repeat;
+    bool mod1_up     = virtual_key == config.mod1 && !key_down;
+    bool mod2_up     = virtual_key == config.mod2 && !key_down;
+    bool esc_down    = virtual_key == VK_ESCAPE && key_down;
+
+    // NOTE: By returning a non-zero value from the hook procedure, the message is consumed and does not get passed to the target window
+    intptr_t pass_message = 0; // i.e. 'false'
+    intptr_t consume_message = 1; // i.e. 'true'
+
+    // Alt+Tab
+    if (key1_down && mod1_held) {
+        intptr_t result = CallNextHookEx(NULL, nCode, wParam, lParam);
+        return mod1key1(&selection, shift_held, key1_repeat);
+    }
+    // Alt+`
+    if (key2_down && mod2_held) {
+        intptr_t result = CallNextHookEx(NULL, nCode, wParam, lParam);
+        return mod2key2(&selection, shift_held, key2_repeat);
+    }
+    // Alt keyup
+    // BUG! Aha! Lemme tell yalittle secret: Our low level hook doesn't observe "Alt keydown" because Alt can be pressed down for
+    //      so many purposes on system level. We're only interested in Alt+Tab, which means that we only really check for "Tab keydown",
+    //      and then transparently check if Alt was already down when Tab was pressed.
+    //      This means that we let all "Alt keydown"s pass through our hook, even the "Alt down" that the user pressed right before
+    //      pressing Tab, which is sort of "ours", but we passed it through anyways (can't consume it after-the-fact).
+    //      The result is that there is a hanging "Alt down" that got passed to the foreground app which needs an "Alt keyup", or
+    //      the Alt key gets stuck. Thus, we never consume an "Alt up", even if we our app used it for some functionality, but pass
+    //      it through so that, just like with all the "Alt keydown"s we pass through, we also pass through all the "Alt keyup"s.
+    //      In short:
+    //      1) Our app never hooks Alt keydown
+    //      2) Our app hooks Alt keyup, but always passes it through on pain of getting a stuck Alt key because of the previous point
+    if (mod1_up) {
+        mod1up(&selection);
+        return pass_message; // See note above on "Alt keyup" on why we don't consume this message
+    }
+    if (mod2_up) {
+        mod2up(&selection);
+        return pass_message; // See note above on "Alt keyup" on why we don't consume this message
+
+        /*
+        // TODO Testing fast_switching
+        if (selected_app_restore) { // && fast_switching
+            SetForegroundWindow(selected_app_restore->window);
+            selected_app_restore = NULL;
+            return 1;
+        }
+        */
+
+        // Hide window
+        int windowGotHidden = ShowWindow(hMainWnd, SW_HIDE);
+        if (windowGotHidden) {
+            print(L"hide: alt keyup\n");
+            //return consume_message; // Consume message BUG: Alt key gets stuck if we consume this message, but this also seems to propogate an Alt keydown event to the underlying window?
+        } else {
+            // The hook caught Alt keyup, but the switcher window was already hidden
+            // Since this is a no-op for us, we pass the message on
+            return CallNextHookEx(NULL, nCode, wParam, lParam);
+        }
+    }
+    // Alt+Esc
+    if ((mod1_held || mod2_held) && esc_down) {
+        return mod_esc(&selection);
+        //cancel(false);
+
+        /*
+        // Hide window
+        int windowGotHidden = ShowWindow(hMainWnd, SW_HIDE);
+        if (windowGotHidden) {
+            print(L"hide: alt+esc\n");
+            return consume_message;
+        } else {
+            // The hook caught Alt+Esc, but the switcher window was already hidden
+            // Since this is a no-op for us, we pass the message on
+            return CallNextHookEx(NULL, nCode, wParam, lParam);
+        }
+        */
+    }
+
+    return CallNextHookEx(NULL, nCode, wParam, lParam);
+}
+
 
 
 #define WM_USER_TRAYICON WM_USER + 1
+
+intptr_t CALLBACK About(void *, unsigned int, intptr_t, intptr_t);
 
 intptr_t CALLBACK WndProc(void *hWnd, unsigned int msg, intptr_t wParam, intptr_t lParam) {
     switch (msg) {
         case WM_CREATE:
         {
-
+            once();
         }
         break;
         case WM_HOTKEY:
         {
-            //DebugOut(L"Here's a pointer for you: %" PRIxPTR "\n", wParam);
-            DebugOut(L"Here: %d\n", wParam);
+            //print(L"Here's a pointer for you: %" PRIxPTR "\n", wParam);
+            print(L"Here: %d\n", wParam);
             //OutputDebugStringW(L"Here's a pointer for you: %" PRIxPTR "\n", wParam);
 
         }
@@ -983,7 +1033,7 @@ intptr_t CALLBACK WndProc(void *hWnd, unsigned int msg, intptr_t wParam, intptr_
             //HWND hwnd = GetForegroundWindow();
             //wchar_t title[256];
             //GetWindowTextW(hwnd, title, 255);
-            //DebugOut(L"Foreground: %s\n", title);
+            //print(L"Foreground: %s\n", title);
         }
         case WM_COMMAND:
         {
@@ -1017,227 +1067,8 @@ intptr_t CALLBACK WndProc(void *hWnd, unsigned int msg, intptr_t wParam, intptr_
     return 0;
 }
 
-
-
-intptr_t CALLBACK LowLevelKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam) {
-    if (nCode != HC_ACTION)
-        return;
-    //
-    // pressed_keys
-    // 
-    // Char-based bitarray
-    // usage:
-    //   char bitarray[BITCOUNT(47)];
-    //   BITSET(bitarray, 23);
-    //   if (BITTEST(bitarray, 35))
-#include <limits.h>	   /* for CHAR_BIT */
-#define BITCOUNT(n)    ((n + CHAR_BIT - 1) / CHAR_BIT)
-#define BITINDEX(b)    ((b) / CHAR_BIT)
-#define BITMASK(b)     (1 << ((b) % CHAR_BIT))
-#define BITSET(a, b)   ((a)[BITINDEX(b)] |=  BITMASK(b))
-#define BITCLEAR(a, b) ((a)[BITINDEX(b)] &= ~BITMASK(b))
-#define BITTEST(a, b)  ((a)[BITINDEX(b)] &   BITMASK(b))
-//
-// Manually track modifier state and key repeat with a bit array (key repeat must be tracked manually in low level hook)
-// vkCode: "The code must be a value in the range 1 to 254." (docs)
-// 256 bits for complete tracking of currently held virtual keys (vkCodes, i.e. VK_* defines).
-    static char pressed_keys[BITCOUNT(256)] = {0};
-
-    // Window selection, incremented/(decremented) on (Shift+)Alt+Tab & (Shift+)Alt+` press & repeat, reset on Alt+Esc & Alt keyup, see below
-    static linked_window_t *selected_app = NULL;
-    static linked_window_t *selected_app_window = NULL;
-    static linked_window_t *selected_app_restore = NULL;
-
-    // Info about the keyboard for the low level hook
-    KBDLLHOOKSTRUCT *kb = (KBDLLHOOKSTRUCT *)lParam;
-
-    // vkCode technically fits in a 'char' (see above), but we'll use the same type as the struct
-    unsigned long virtual_key = kb->vkCode;
-    unsigned long scan_code = kb->scanCode;
-
-    // Manually track key repeat using 'pressed_keys' as a bit array (see above)
-    int key_was_down = BITTEST(pressed_keys, virtual_key);
-    int key_down = !(kb->flags & LLKHF_UP);
-    int key_repeat = key_was_down && key_down;
-
-    if (!key_down) {
-        BITCLEAR(pressed_keys, virtual_key);
-    }
-    if (key_down && !key_repeat) {
-        BITSET(pressed_keys, virtual_key);
-    }
-
-    //DebugOut(L"virtual_key:%llu\tscanCode:%llu\tdown:%d\trepeat:%d\n", virtual_key, scanCode, bKeyDown, bKeyRepeat);
-
-    // ShiftKey & AltKey: Note the shift & alt keys are the *left* keys (VK_LSHIFT & VK_LMENU)
-    // Key29: Scan code 0x29 (hex) = 41 (decimal). It's the key that is physically below Esc, left of 1 and above Tab
-    int shift_held = BITTEST(pressed_keys, VK_LSHIFT);
-    int alt_held = BITTEST(pressed_keys, VK_LMENU);
-    int alt_up = virtual_key == VK_LMENU && !key_down;
-    int tab_down = virtual_key == VK_TAB && key_down && !key_repeat;
-    int tab_repeat = virtual_key == VK_TAB && key_down && key_repeat;
-    int key29_down = scan_code == 41 && key_down && !key_repeat;
-    int key29_repeat = scan_code == 41 && key_down && key_repeat;
-    int esc_down = virtual_key == VK_ESCAPE && key_down;
-
-    // Note:
-    // By returning a non-zero value from the hook procedure, the message is consumed and does not get passed to the target window
-
-    // Alt+Tab
-    if (alt_held && tab_down) {
-        if (selected_app == NULL && selected_app_window == NULL) {
-            // We've been reset and are starting from scratch so get all windows
-            linkwindows();
-            print_windows(false);
-            DebugOut(L"foreground_app: %s\n", title(GetForegroundWindow()).text);
-            // TODO testing fast_switching
-            selected_app_restore = linked_window(GetForegroundWindow());
-        }
-
-        linked_window_t *next = next_top_window(selected_app, shift_held, true); // yes wrap-around
-
-        if (selected_app != next && next) {
-            selected_app = next;
-            DebugOut(L"selected_app: %s %s\n", selected_app->exe_name.text, selected_app->title.text);
-        }
-
-        if (!next) {
-            DebugOut(L"whoops! next selected app is NULL!\n");
-        }
-
-        // TODO Testing "immediate" / "fast" mode:
-        bool fast_switching = true;
-        if (selected_app && fast_switching) {
-            SetForegroundWindow(selected_app->hwnd);
-            return 1;
-        }
-
-        // Show window
-        int windowGotShown = !ShowWindow(hMainWnd, SW_SHOW);
-        if (windowGotShown) {
-            UpdateWindow(hMainWnd); // TODO / BUG: Is this necessary? It's here since the template code included it when showing window
-        }
-
-        // Consume message
-        return 1;
-    }
-    // Alt+Tab repeat
-    if (alt_held && tab_repeat) {
-
-        linked_window_t *next = next_top_window(selected_app, shift_held, false); // no wrap-around
-
-        if (selected_app != next && next) {
-            selected_app = next;
-            DebugOut(L"selected_app repeat: %s %s\n", selected_app->exe_name.text, selected_app->title.text);
-        }
-
-        if (!next) {
-            DebugOut(L"whoops! next selected app is NULL!\n");
-        }
-
-        // Consume message
-        return 1;
-    }
-    // Alt+`
-    if (alt_held && key29_down) {
-        if (selected_app == NULL && selected_app_window == NULL) {
-            // We've been reset and are starting from scratch so get all windows
-            linkwindows();
-            //print_windows(false);
-            //DebugOut(L"foreground_app: %s\n", title(GetForegroundWindow()).text);
-        }
-
-        linked_window_t *next = next_sub_window(selected_app_window, shift_held, true); // yes wrap-around
-
-        if (selected_app_window != next && next) {
-            selected_app_window = next;
-            DebugOut(L"selected_app_window: %s %s\n", selected_app_window->exe_name.text, selected_app_window->title.text);
-        }
-
-        if (!next) {
-            DebugOut(L"whoops! next selected app window is NULL!\n");
-        }
-
-        if (selected_app_window) {
-            SetForegroundWindow(selected_app_window->hwnd);
-        }
-
-        // Consume message
-        return 1;
-    }
-    // Alt+` repeat
-    if (alt_held && key29_repeat) {
-        linked_window_t *next = next_sub_window(selected_app_window, shift_held, false); // no wrap-around
-
-        if (selected_app_window != next && next) {
-            selected_app_window = next;
-            DebugOut(L"selected_app_window repeat: %s %s\n", selected_app_window->exe_name.text, selected_app_window->title.text);
-        }
-
-        if (!next) {
-            DebugOut(L"whoops! next selected app window is NULL!\n");
-        }
-
-        if (selected_app_window) {
-            SetForegroundWindow(selected_app_window->hwnd);
-        }
-
-        // Consume message
-        return 1;
-    }
-    // Alt keyup
-    if (alt_up) {
-        if (selected_app) {
-            SetForegroundWindow(selected_app->hwnd);
-        }
-
-        // Reset selection
-        selected_app = NULL;
-        selected_app_window = NULL;
-
-        // Hide window
-        int windowGotHidden = ShowWindow(hMainWnd, SW_HIDE);
-        if (windowGotHidden) {
-            DebugOut(L"hide: alt keyup\n");
-            //return 1; // Consume message BUG: Alt key gets stuck if we consume this message, but this also seems to propogate an Alt keydown event to the underlying window?
-        } else {
-            // The hook caught Alt keyup, but the switcher window was already hidden
-            // Since this is a no-op for us, we pass the message on
-            return CallNextHookEx(NULL, nCode, wParam, lParam);
-        }
-    }
-    // Alt+Esc
-    if (alt_held && esc_down) {
-        // Reset selection
-        selected_app = NULL;
-        selected_app_window = NULL;
-
-        // TODO testing fast_switching
-        if (selected_app_restore) { /* && fast_switching */
-            SetForegroundWindow(selected_app_restore->hwnd);
-            selected_app_restore = NULL;
-            return 1;
-        }
-
-        // Hide window
-        int windowGotHidden = ShowWindow(hMainWnd, SW_HIDE);
-        if (windowGotHidden) {
-            DebugOut(L"hide: alt+esc\n");
-            return 1; // Consume message
-        } else {
-            // The hook caught Alt+Esc, but the switcher window was already hidden
-            // Since this is a no-op for us, we pass the message on
-            return CallNextHookEx(NULL, nCode, wParam, lParam);
-        }
-    }
-
-    return CallNextHookEx(NULL, nCode, wParam, lParam);
-}
-
-
-
-// Message handler for about box.
 intptr_t CALLBACK About(void *hWnd, unsigned int msg, intptr_t wParam, intptr_t lParam) {
+    // Message handler for about box.
     switch (msg) {
         case WM_INITDIALOG:
             return (intptr_t)true;
