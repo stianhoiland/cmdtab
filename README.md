@@ -1,6 +1,8 @@
 # cmdtab[^1]
 The best macOS-style Alt-Tab window/app switcher replacement for Windows, written in straight<sup>delicious</sup> C.
 
+![screenshot-cropped-2](https://github.com/stianhoiland/cmdtab/assets/2081712/dbd40b7b-880e-4813-b925-4553ba0ffad5)
+
 ## What's the deal?
 
 1. On Windows, Alt-Tab cycles through a mix of different windows and applications with small window previews.
