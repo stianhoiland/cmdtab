@@ -1,15 +1,9 @@
 #pragma once
 
-// header.h : include file for standard system include files,
-// or project specific include files
-//
-
 #define _UNICODE
 #define UNICODE
-//#include "resource.h"
 
-//#include "targetver.h"
-// // // Including SDKDDKVer.h defines the highest available Windows platform.
+// Including SDKDDKVer.h defines the highest available Windows platform.
 // If you wish to build your application for a previous Windows platform, include WinSDKVer.h and
 // set the _WIN32_WINNT macro to the platform you wish to support before including SDKDDKVer.h.
 #include <SDKDDKVer.h>
@@ -17,40 +11,30 @@
 // Windows Header Files
 //#define WIN32_LEAN_AND_MEAN // Exclude rarely-used stuff from Windows headers
 #include <windows.h>
+
 // C RunTime Header Files
 #include <stdlib.h>
 #include <stdbool.h>
 #include <malloc.h>
 #include <memory.h>
-//#include <tchar.h>
 
-
-//
-// cmdtab.c
-//
+// cmdtab.h
 #pragma comment(lib, "shlwapi.lib") 
 #pragma comment(lib, "dwmapi.lib") 
 #pragma comment(lib, "version.lib") // Used by appname()
-//#pragma comment(lib,"user32.lib") 
 
 #include <wchar.h>     // We're wiiiide, baby!
 #include <stdarg.h>    // Used by print()
-//#include "debugapi.h"  // Used by print() -- ehh: "To use this function [OutputDebugStringW], you must include the Windows.h header in your application (not debugapi.h)." (docs)
 #include "WinUser.h"   // Used by title(), path(), filter(), link(), next()
 #include "processthreadsapi.h" // Used by path()
 #include "WinBase.h"   // Used by path()
 #include "handleapi.h" // Used by path()
 #include "Shlwapi.h"   // Used by name()
-//#include "corecrt_wstring.h" // Used by name(), included by wchar.h
 #include "dwmapi.h"    // Used by filter()
+#include "strsafe.h"   // Used by appname()
+
 #define COBJMACROS
 #include "commoncontrols.h" // Used by icon()
-
-//#include "winver.h" // Used by appname()
-
-#include "strsafe.h" // Used by appname()
-
-
 
 #include <intrin.h> // Used by debug(), crash()
 
@@ -77,29 +61,3 @@
 #define BITSET(a, b)   ((a)[BITINDEX(b)] |=  BITMASK(b))
 #define BITCLEAR(a, b) ((a)[BITINDEX(b)] &= ~BITMASK(b))
 #define BITTEST(a, b)  ((a)[BITINDEX(b)] &   BITMASK(b))
-
-
-
-
-
-
-//#include "guiddef.h"
-
-//#include <commoncontrols.h>
-//#include "comip.h"
-//#include "comdef.h"
-
-//#include "combaseapi.h" // IID_PPV_ARGS macro
-//#include "commctrl.h"
-//#include "dpa_dsa.h"
-//#include "prsht.h"
-//#include "richedit.h"
-//#include "richole.h"
-//#include "shlobj.h"
-//#include "textserv.h"
-//#include "tom.h"
-//#include "uxtheme.h"
-//#include "windowsx.h"
-//#include "winuser.h"
-
-//#pragma comment(lib, "Comctl32.lib") 
