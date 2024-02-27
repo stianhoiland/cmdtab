@@ -14,7 +14,7 @@ You like the way Apple does it, but you're using Windows? CmdTab for Windows fix
 - Hotkey *(default Alt-Tab)* to switch apps: Chrome → Spotify → File Explorer
 - Hotkey *(default Alt-`)* to switch windows: Chrome1 → Chrome2 → Chrome3
 - Big readable app icons (not those tiny bewildering window previews)
-- Super small and lightweight program (currently less than 200kb)
+- Super small and lightweight program (currently less than 26kb)
 - Simple, clean, clear, commented C source code (easy to change/fix/extend by you/me/everyone!)
 - Lots of tiny, useful QoL features, like reverse, arrow keys, cancel, restore, wrap bump, quit app, close window, delayed show...
 - So fast!
