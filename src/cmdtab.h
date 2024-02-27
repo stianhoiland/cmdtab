@@ -2,11 +2,13 @@
 
 #define _UNICODE
 #define UNICODE
+//#define _DEBUG
+
 
 // Including SDKDDKVer.h defines the highest available Windows platform.
 // If you wish to build your application for a previous Windows platform, include WinSDKVer.h and
 // set the _WIN32_WINNT macro to the platform you wish to support before including SDKDDKVer.h.
-#include <SDKDDKVer.h>
+//#include <SDKDDKVer.h>
 
 // Windows Header Files
 //#define WIN32_LEAN_AND_MEAN // Exclude rarely-used stuff from Windows headers
@@ -38,9 +40,24 @@
 
 #include <intrin.h> // Used by debug(), crash()
 
-#define debug() __debugbreak() // Or DebugBreak() in debugapi.h
-#define crash() __fastfail(FAST_FAIL_FATAL_APP_EXIT)
-#define noop() while(0)
+
+
+
+#define WIDE(str) L##str
+#define EXPAND(x) WIDE(x)
+#define __WFILE__ EXPAND(__FILE__)
+#define __WFUNC__ EXPAND(__FUNCTION__)
+
+#ifdef _DEBUG
+#define dbg_print(fmt, ...) print(L"%s():%d " fmt, __WFUNC__, __LINE__, __VA_ARGS__);
+#else
+#define dbg_print(fmt, ...) 
+#endif
+
+#define debug()       __debugbreak() // Or DebugBreak() in debugapi.h
+#define crash()       __fastfail(FAST_FAIL_FATAL_APP_EXIT)
+#define noop()        while(0)
+#define countof(a)    (ptrdiff_t)(sizeof(a) / sizeof(*(a)))
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
