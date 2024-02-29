@@ -12,13 +12,13 @@ typedef struct config config_t;
 typedef unsigned long vkcode;
 
 struct title {
-	wchar_t text[(MAX_PATH*2)+1];
+	wchar_t text[(MAX_PATH * 2) + 1];
 	int length;
 	bool ok;
 };
 
 struct path {
-	wchar_t text[(MAX_PATH*1)+1];
+	wchar_t text[(MAX_PATH * 1) + 1];
 	unsigned long length; // QueryFullProcessImageNameW() wants 'unsigned long'
 	bool ok;
 };
@@ -162,7 +162,7 @@ static void SetForegroundWindow_ALTHACK(void *hwnd) {
 static title_t title(void *hwnd) {
 	title_t title = {
 		.text = {0},
-		.length = countof(((title_t*)0)->text), // BUG / TODO Wait, does size need -1 here or bellow?
+		.length = countof(((title_t *)0)->text), // BUG / TODO Wait, does size need -1 here or bellow?
 		.ok = {0}
 	};
 	title.length = GetWindowTextLengthW(hwnd); // Size [in characters!]
@@ -554,7 +554,7 @@ static bool filter(void *hwnd) {
 }
 
 
-static void add(windows_t* windows, void *hwnd) {
+static void add(windows_t *windows, void *hwnd) {
 	path_t exe_path = path(hwnd);
 
 	if (!exe_path.ok) {
@@ -1089,7 +1089,7 @@ static bool get_key(keyboard_t *keyboard, vkcode key) {
 	return BITTEST(keyboard->keys, key);
 }
 
-static bool set_key(keyboard_t* keyboard, vkcode key, bool down) {
+static bool set_key(keyboard_t *keyboard, vkcode key, bool down) {
 	bool already_down = get_key(keyboard, key);
 	if (down) {
 		BITSET(keyboard->keys, key);
