@@ -4,36 +4,36 @@ typedef struct title title_t;
 typedef struct path path_t;
 typedef struct linked_window linked_window_t;
 typedef struct windows windows_t;
-typedef struct keyboard keyboard_t;
-typedef struct config config_t;
 typedef struct selection selection_t;
+typedef struct keyboard keyboard_t;
 typedef struct gdi gdi_t;
+typedef struct config config_t;
 
 typedef unsigned long vkcode;
 
 struct title {
-    int length;
     wchar_t text[(MAX_PATH*2)+1];
+    int length;
     bool ok;
 };
 
 struct path {
-    unsigned long length; // QueryFullProcessImageNameW() wants 'unsigned long'
     wchar_t text[(MAX_PATH*1)+1];
+    unsigned long length; // QueryFullProcessImageNameW() wants 'unsigned long'
     bool ok;
 };
 
 struct linked_window {
+    path_t exe_path;
     path_t exe_name;
-    title_t title;
     path_t app_name;
+    title_t title;
     void *hico;
     void *hwnd;
     linked_window_t *next_sub_window;
     linked_window_t *prev_sub_window;
     linked_window_t *next_top_window;
     linked_window_t *prev_top_window;
-    path_t exe_path;
 };
 
 //==============================================================================
@@ -45,8 +45,23 @@ struct windows {
     int count;
 };
 
+struct selection {
+    linked_window_t *window; // Rename 'current'?
+    linked_window_t *restore; // Rename 'initial'?
+    bool active;
+};
+
 struct keyboard {
     char keys[32]; // 256 bits for tracking key repeat
+};
+
+struct gdi {
+    void *hdc;
+    void *hbm;
+    int width;
+    int height;
+    RECT rect;
+    //HBRUSH bg;
 };
 
 struct config {
@@ -61,21 +76,6 @@ struct config {
     bool ignore_minimized; // TODO? Atm, 'ignore_minimized' affects both Alt+` and Alt+Tab (which may be unexpected. Maybe it should only apply to subwindow switching? Etc.) TODO Should this be called 'restore_minimized'?
     unsigned gui_delay;
     //wchar_t blacklist[32][(MAX_PATH*1)+1];
-};
-
-struct selection {
-    linked_window_t *window; // Rename 'current'?
-    linked_window_t *restore; // Rename 'initial'?
-    bool active;
-};
-
-struct gdi {
-    void *hdc;
-    void *hbm;
-    int width;
-    int height;
-    RECT rect;
-    //HBRUSH bg;
 };
 
 //==============================================================================
@@ -93,13 +93,13 @@ static void *hKeyboardHook;
 
 static windows_t windows; // Filtered windows, as returned by EnumWindows(), filtered by filter() and added by add()
 
-static keyboard_t keyboard; // Must manually track key repeat for the low-level keyboard hook
-
-static config_t config;
-
 static selection_t selection; // State for currently selected window
 
+static keyboard_t keyboard; // Must manually track key repeat for the low-level keyboard hook
+
 static gdi_t gdi; // Off-screen bitmap used for double-buffering
+
+static config_t config;
 
 //==============================================================================
 // Uncomfortable forward declarations
@@ -112,6 +112,28 @@ static VOID CALLBACK TimerProc(HWND, UINT, UINT_PTR, DWORD); // Resolve circular
 //==============================================================================
 // Utility functions
 //==============================================================================
+
+static void print(wchar_t *fmt, ...) {
+    // Low level debug printing w/ the following features:
+    // vararg, wide char, formatted, safe (i.e. vswprintf_s)
+    // TODO #ifdef this away for release builds?
+    wchar_t wcs[4096];
+    va_list argp;
+    va_start(argp, fmt);
+    vswprintf_s(wcs, countof(wcs), fmt, argp); // BUG Not checking return value for error
+    va_end(argp);
+    OutputDebugStringW(wcs);
+}
+
+static bool once(void) {
+    static bool first = true;
+    if (first) {
+        first = !first;
+        return true;
+    } else {
+        return false;
+    }
+}
 
 static void SetForegroundWindow_ALTHACK(void *hwnd) {
     // TODO / BUG / HACK!
@@ -137,72 +159,21 @@ static void SetForegroundWindow_ALTHACK(void *hwnd) {
 // Here we go!
 //==============================================================================
 
-static void defaults(config_t *config) {
-    //
-    // Note about key2, used for switching sub windows
-    //
-    // The default key2 is scan code 0x29 (hex) / 41 (decimal)
-    // This is the key that is physically below Esc, left of 1 and above Tab
-    //
-    *config = (config_t){
-        .mod1 = VK_LMENU,
-        .key1 = VK_TAB,
-        .mod2 = VK_LMENU,
-        .key2 = MapVirtualKeyW(0x29, MAPVK_VSC_TO_VK_EX),
-        .switch_apps = true,
-        .switch_windows = true,
-        .wrap_bump = true,
-        //.fast_switching = false, // BUG / TODO Doesn't work. Have to find a way to show windows without changing their Z-Order (i.e. "previewing" them)
-        .ignore_minimized = false, // NOTE Currently only observed for subwindow switching and BUG! Move ignore_minimized handling from show() -> selectnext()
-        .gui_delay = 150,
-        /*
-        .blacklist = { // TODO blacklist isn't implemented yet
-            L"TextInputHost.exe",
-            L"SystemSettings.exe",
-            L"ApplicationFrameHost.exe", // BUG Oof, this one is too heavy-handed. This excludes Calculator, for example. Have to find a better way to deal with UWP windows
-        }
-        */
-    };
-}
-
-static bool once(void) {
-    static bool first = true;
-    if (first) {
-        first = !first;
-        return true;
-    } else {
-        return false;
-    }
-}
-
-static void print(wchar_t *fmt, ...) {
-    // Low level debug printing w/ the following features:
-    // vararg, wide char, formatted, safe (i.e. vswprintf_s)
-    // TODO #ifdef this away for release builds?
-    wchar_t wcs[4096];
-    va_list argp;
-    va_start(argp, fmt);
-    vswprintf_s(wcs, countof(wcs), fmt, argp); // BUG Not checking return value for error
-    va_end(argp);
-    OutputDebugStringW(wcs);
-}
-
-
 static title_t title(void *hwnd) {
     title_t title = {
-        .length = countof(((title_t*)0)->text), // BUG / TODO Wait, does size need -1 here?
         .text = {0},
+        .length = countof(((title_t*)0)->text), // BUG / TODO Wait, does size need -1 here or bellow?
         .ok = {0}
     };
-    title.ok = GetWindowTextW(hwnd, title.text, title.length) > 0; // Length param: "The maximum number of characters to copy to the buffer, including the null character." (docs)
     title.length = GetWindowTextLengthW(hwnd); // Size [in characters!]
+    title.ok = GetWindowTextW(hwnd, title.text, title.length) > 0; // Length param: "The maximum number of characters to copy to the buffer, including the null character." (docs)
     return title;
 }
 
 static path_t path(void *hwnd) {
     path_t path = {
-        .length = countof(((path_t *)0)->text), // BUG / TODO Wait, does size need -1 here? NOTE Used as buffer size (in) [in characters! (docs)] and path length (out) by QueryFullProcessImageNameW()
         .text = {0},
+        .length = countof(((path_t *)0)->text), // BUG / TODO Wait, does size need -1 here or below? NOTE Used as buffer size (in) [in characters! (docs)] and path length (out) by QueryFullProcessImageNameW()
         .ok = {0}
     };
     // How to get the file path of the executable for the process that spawned the window:
@@ -243,8 +214,8 @@ static bool patheq(path_t *path1, path_t *path2) {
 
 static path_t filename(wchar_t *path, bool ext) {
     path_t name = {
-        .length = countof(((path_t *)0)->text), // BUG / TODO Wait, does size need -1 here?
         .text = {0},
+        .length = countof(((path_t *)0)->text), // BUG / TODO Wait, does size need -1 here?
         .ok = {0}
     };
     errno_t cpy_error = wcscpy_s(name.text, name.length, PathFindFileNameW(path)); // BUG Not checking 'cpy_error'
@@ -271,8 +242,8 @@ static path_t appname(wchar_t *path) {
 
     // Our return value:
     path_t name = {
-        .length = countof(((path_t *)0)->text),
         .text = {0},
+        .length = countof(((path_t *)0)->text),
         .ok = {0}
     };
 
@@ -308,8 +279,8 @@ static path_t appname(wchar_t *path) {
         goto done;
     }
 
-    name.ok = wcscpy_s(name.text, name.length, result) == 0;
     name.length = length;
+    name.ok = wcscpy_s(name.text, name.length, result) == 0;
 
     done: {
         free(version);
@@ -374,6 +345,33 @@ static void *icon(wchar_t *path, void *hwnd) {
 }
 
 
+static void defaults(config_t *config) {
+    //
+    // Note about key2, used for switching sub windows
+    //
+    // The default key2 is scan code 0x29 (hex) / 41 (decimal)
+    // This is the key that is physically below Esc, left of 1 and above Tab
+    //
+    *config = (config_t){
+        .mod1 = VK_LMENU,
+        .key1 = VK_TAB,
+        .mod2 = VK_LMENU,
+        .key2 = MapVirtualKeyW(0x29, MAPVK_VSC_TO_VK_EX),
+        .switch_apps = true,
+        .switch_windows = true,
+        .wrap_bump = true,
+        //.fast_switching = false, // BUG / TODO Doesn't work. Have to find a way to show windows without changing their Z-Order (i.e. "previewing" them)
+        .ignore_minimized = false, // NOTE Currently only observed for subwindow switching and BUG! Move ignore_minimized handling from show() -> selectnext()
+        .gui_delay = 150,
+        /*
+        .blacklist = { // TODO blacklist isn't implemented yet
+            L"TextInputHost.exe",
+            L"SystemSettings.exe",
+            L"ApplicationFrameHost.exe", // BUG Oof, this one is too heavy-handed. This excludes Calculator, for example. Have to find a better way to deal with UWP windows
+        }
+        */
+    };
+}
 
 static int numapps(windows_t *windows) {
     // TODO Don't use numapps() and width(); figure out something more elegant
@@ -398,181 +396,6 @@ static int width(windows_t *windows) {
     return (icon_width * count) + (horz_pad * count) + (horz_pad * 2);
 }
 
-static void redraw(gdi_t *gdi, void* hwnd, selection_t *selection) {
-    // TODO Resolve circular dep more elegantly
-    static linked_window_t *find_first(linked_window_t *window, bool top_level);
-
-    // NOTE Previously gdi_init():
-    RECT rect;
-    GetClientRect(hwnd, &rect);
-
-    if (!EqualRect(&gdi->rect, &rect)) {
-        print(L"new hbm\n");
-
-        gdi->rect = rect;
-        gdi->width = rect.right - rect.left;
-        gdi->height = rect.bottom - rect.top;
-
-        DeleteObject(gdi->hbm);
-        DeleteDC(gdi->hdc);
-
-        HDC hdc = GetDC(hwnd);
-        gdi->hdc = CreateCompatibleDC(hdc);
-        gdi->hbm = CreateCompatibleBitmap(hdc, gdi->width, gdi->height);
-        SelectObject(gdi->hdc, gdi->hbm);
-    }
-
-    // NOTE Previously gdi_redraw():
-#define HIGHLIGHT RGB(76, 194, 255)
-#define BACKGROUND RGB(32, 32, 32) // dark mode?
-#define ITEM_BG RGB(11, 11, 11)
-#define TEXT_COLOR RGB(235, 235, 235)
-
-#define OUTLINE 3
-#define VERT_PAD 20
-#define HORI_PAD 16
-#define ICON_WIDTH 64
-#define ROUNDED 10
-    // TODO Create a 'style_t' type
-    // TODO This is a mess atm. Working sorta fine, with some leaks I imagine, and looking rather terrible. FIX!
-
-
-    RedrawWindow(hwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
-
-    RECT rc = {0};
-    //GetClientRect(WindowFromDC(gdi->hdc), &rc);
-    GetClientRect(hwnd, &rc);
-
-    const int ver = VERT_PAD; // Vertical padding (top)
-    const int hor = HORI_PAD; // Horizontal padding
-    const int width = ICON_WIDTH; // Icon width
-    int i = 0;
-
-    static HBRUSH icon_brush = {0};
-    static HBRUSH bg_brush = {0};
-    static HBRUSH selection_brush = {0};
-    if (bg_brush == NULL) {
-        //bg_brush = CreateSolidBrush(RGB(0, 0, 0));
-        //bg_brush = (HBRUSH)(COLOR_BTNFACE + 1);
-        //bg_brush = CreateSolidBrush(RGB(212, 208, 200));
-        bg_brush = CreateSolidBrush(BACKGROUND);
-        icon_brush = bg_brush;
-        selection_brush = CreateSolidBrush(ITEM_BG);
-    }
-
-    FillRect(gdi->hdc, &rc, bg_brush);
-
-    //rc.bottom = rc.bottom - (ver / 2);
-
-    linked_window_t *window;
-
-    i = 0;
-    window = &windows.array[0]; // windows->array[0] is always a top window because it is necessarily the first window of its app in the list
-    while (window) {
-
-        // Draw selection rectangle
-        linked_window_t *top1 = find_first(window, false);
-        linked_window_t *top2 = find_first(selection->window, false);
-        if (top1 == top2) { // Check if the windows are the same app
-
-            //int center = (width * i) + (width / 2) + (hor * i);
-
-            //rc.left = hor + center - (width / 2);// -width; // - width means make the rect wider to the left
-            //rc.right = hor + center + (width / 2);// +width; // + width means make the rect wider to the right
-
-            int x = (HORI_PAD + ICON_WIDTH) * i;
-
-            RECT rc2 = (RECT){
-                .left = x + 8,
-                .top = rc.top + 8 + 4,
-                .right = x + 64 + HORI_PAD + 8,
-                .bottom = rc.top + 64 + HORI_PAD + 8 + 4
-            };
-            //rc2.left += 32;
-            //rc2.right -= 32;
-            //FillRect(gdi->hdc, &rc2, CreateSolidBrush(RGB(200, 200, 200)));
-            //SelectObject(gdi->hdc, GetStockObject(GRAY_BRUSH));
-
-            HPEN new_pen = CreatePen(PS_SOLID, OUTLINE, HIGHLIGHT);
-            HPEN old_pen = (HPEN)SelectObject(gdi->hdc, new_pen);
-            HBRUSH new_brush = CreateSolidBrush(ITEM_BG);
-            HBRUSH old_brush = (HBRUSH)SelectObject(gdi->hdc, new_brush);
-            RoundRect(gdi->hdc, rc2.left, rc2.top, rc2.right, rc2.bottom, ROUNDED, ROUNDED);
-        }
-
-        if (window->next_top_window) {
-            window = window->next_top_window;
-            i++;
-        } else {
-            break;
-        }
-    }
-
-    rc.bottom = rc.bottom - 4; //(ver / 2);
-    i = 0;
-    window = &windows.array[0]; // windows->array[0] is always a top window because it is necessarily the first window of its app in the list
-    while (window) {
-
-        int center = (width * i) + (width / 2) + (hor * i);
-
-        rc.left = hor + center - (width / 2) - width; // - width means make the rect wider to the left
-        rc.right = hor + center + (width / 2) + width; // + width means make the rect wider to the right
-
-        linked_window_t *top1 = find_first(window, false);
-        linked_window_t *top2 = find_first(selection->window, false);
-
-        if (top1 == top2) {
-            icon_brush = selection_brush;
-        } else {
-            icon_brush = bg_brush;
-        }
-
-        // Draw icon
-        void *hico = window->hico;//icon(window->exe_path.text, window->hwnd);
-        DrawIconEx(gdi->hdc, hor + (width * i) + (hor * i), ver, hico, ICON_WIDTH, ICON_WIDTH, 0, icon_brush, DI_NORMAL);
-
-        // Draw app name
-        if (top1 == top2) { // Check if the windows are the same app
-            wchar_t *title;
-            if (window->app_name.ok) {
-                title = window->app_name.text;
-            } else {
-                title = window->exe_name.text;
-            }
-            rc.bottom -= 3;
-            //LOGFONT logfont;
-            //GetObject(hFont, sizeof(LOGFONT), &logfont);
-
-            SelectObject(gdi->hdc, GetStockObject(DEFAULT_GUI_FONT)); // TODO / BUG Leaks, I believe? Have to capture and later release return value when selecting object?
-            //SelectObject(gdi->hdc, GetFont(L"Microsoft Sans Serif", 15));
-            SetTextColor(gdi->hdc, TEXT_COLOR);
-            //SetBkColor(gdi->hdc, RGB(200, 200, 200));
-            SetBkColor(gdi->hdc, ITEM_BG);
-            SetBkMode(gdi->hdc, TRANSPARENT);
-
-            // TODO Adjust centered text to align with left-most and right-most edges of window
-            //print(L"%d, %d, %d, %d\n", rc.left, rc.top, rc.right, rc.bottom);
-            if (rc.left < 0) {
-                //rc.right += abs(rc.left);
-                //rc.left = 0;
-                //print(L"%d, %d, %d, %d\n", rc.left, rc.top, rc.right, rc.bottom);
-            } else if (rc.right > rect.right) {
-                //rc.left -= rc.right - rect.right; // TODO Fix up messy code: rc is modified rect, rect is "client rect"
-                //rc.right = rect.right;
-                //print(L"%d, %d, %d, %d\n", rc.left, rc.top, rc.right, rc.bottom);
-            }
-
-            DrawTextW(gdi->hdc, title, -1, &rc, DT_CENTER | DT_SINGLELINE | DT_BOTTOM);
-        }
-
-        if (window->next_top_window) {
-            window = window->next_top_window;
-            i++;
-        } else {
-            break;
-        }
-    }
-}
 
 static void show_hwnd(void *hwnd, bool restore) {
     if (restore && IsIconic(hwnd)) {
@@ -623,8 +446,21 @@ static VOID TimerProc(HWND hWnd, UINT uMessage, UINT_PTR uEventId, DWORD dwTime)
 
 static bool filter(void *hwnd) {
 
-    // Window must be visible
+    if (config.ignore_minimized && IsIconic(hwnd)) {
+        return false;
+    }
+    // Raymond Chen: https://devblogs.microsoft.com/oldnewthing/20200302-00/?p=103507
     if (IsWindowVisible(hwnd) == false) {
+        return false;
+    }
+    int cloaked = 0;
+    int success = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof cloaked); // Windows 8
+    if (success && cloaked) {
+        return false;
+    }
+    // "A tool window [i.e. WS_EX_TOOLWINDOW] does not appear in the taskbar or
+    // in the dialog that appears when the user presses ALT+TAB." (docs)
+    if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) {
         return false;
     }
 
@@ -658,27 +494,11 @@ static bool filter(void *hwnd) {
     //}
 
 
-    if (config.ignore_minimized && IsIconic(hwnd)) {
-        return false;
-    }
-    // Raymond Chen: https://devblogs.microsoft.com/oldnewthing/20200302-00/?p=103507
-    int cloaked = 0;
-    int success = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof cloaked); // Windows 8
-    if (success && cloaked) {
-        return false;
-    }
 
+    //if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_NOACTIVATE) {
+        //return false;
+    //}
 
-    // "A tool window [i.e. WS_EX_TOOLWINDOW] does not appear in the taskbar or
-    // in the dialog that appears when the user presses ALT+TAB." (docs)
-    if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) {
-        return false;
-    }
-    /*
-    if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_NOACTIVATE) {
-        return false;
-    }
-    */
     // Omg, this one gets rid of many things that shouldn't appear in Alt-Tab
     // EDIT Oh noes, Calculator disappears!
     /*
@@ -733,6 +553,7 @@ static bool filter(void *hwnd) {
     return true;
 }
 
+
 static void add(windows_t* windows, void *hwnd) {
     path_t exe_path = path(hwnd);
 
@@ -759,16 +580,16 @@ static void add(windows_t* windows, void *hwnd) {
 
     linked_window_t *window = &windows->array[windows->count];
     windows->count++;
+    window->exe_path = exe_path;
     window->exe_name = exe_name;
-    window->title = window_title;
     window->app_name = app_name;
+    window->title = window_title;
     window->hico = hico;
     window->hwnd = hwnd;
     window->next_sub_window = NULL;
     window->prev_sub_window = NULL;
     window->next_top_window = NULL;
     window->prev_top_window = NULL;
-    window->exe_path = exe_path;
 }
 
 static void link(windows_t *windows) {
@@ -851,6 +672,7 @@ static BOOL EnumProc(HWND hWnd, LPARAM lParam) {
     }
     return true; // Return true to continue EnumWindows()
 }
+
 
 static void print_window(linked_window_t *window, bool details) {
     if (window) {
@@ -1001,6 +823,7 @@ static linked_window_t *find_next(linked_window_t *window, bool top_level, bool 
     return window;
 }
 
+
 static void select_null(selection_t *selection) {
     selection->window = NULL;
     selection->restore = NULL;
@@ -1028,7 +851,6 @@ static void select_foreground(selection_t *selection) {
         /* dbg */ print_window(selection->window, false);
     }
 }
-
 
 static void select_next(selection_t *selection, bool top_level, bool reverse_direction, bool allow_wrap) {
     linked_window_t *new = find_next(selection->window, top_level, reverse_direction, allow_wrap);
@@ -1084,6 +906,185 @@ static void select_done(selection_t *selection, bool should_switch, bool should_
 }
 
 
+static void redraw(gdi_t *gdi, void *hwnd, selection_t *selection) {
+    // TODO Resolve circular dep more elegantly
+    static linked_window_t *find_first(linked_window_t *window, bool top_level);
+
+    // NOTE Previously gdi_init():
+
+    RECT rect;
+    GetClientRect(hwnd, &rect);
+
+    if (!EqualRect(&gdi->rect, &rect)) {
+        print(L"new hbm\n");
+
+        gdi->rect = rect;
+        gdi->width = rect.right - rect.left;
+        gdi->height = rect.bottom - rect.top;
+
+        DeleteObject(gdi->hbm);
+        DeleteDC(gdi->hdc);
+
+        HDC hdc = GetDC(hwnd);
+        gdi->hdc = CreateCompatibleDC(hdc);
+        gdi->hbm = CreateCompatibleBitmap(hdc, gdi->width, gdi->height);
+        SelectObject(gdi->hdc, gdi->hbm);
+    }
+
+    // NOTE Previously gdi_redraw():
+
+    #define HIGHLIGHT RGB(76, 194, 255)
+    #define BACKGROUND RGB(32, 32, 32) // dark mode?
+    #define ITEM_BG RGB(11, 11, 11)
+    #define TEXT_COLOR RGB(235, 235, 235)
+
+    #define OUTLINE 3
+    #define VERT_PAD 20
+    #define HORI_PAD 16
+    #define ICON_WIDTH 64
+    #define ROUNDED 10
+    // TODO Create a 'style_t' type
+    // TODO This is a mess atm. Working sorta fine, with some leaks I imagine, and looking rather terrible. FIX!
+
+
+    RedrawWindow(hwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
+
+    RECT rc = {0};
+    //GetClientRect(WindowFromDC(gdi->hdc), &rc);
+    GetClientRect(hwnd, &rc);
+
+    const int ver = VERT_PAD; // Vertical padding (top)
+    const int hor = HORI_PAD; // Horizontal padding
+    const int width = ICON_WIDTH; // Icon width
+    int i = 0;
+
+    static HBRUSH icon_brush = {0};
+    static HBRUSH bg_brush = {0};
+    static HBRUSH selection_brush = {0};
+    if (bg_brush == NULL) {
+        //bg_brush = CreateSolidBrush(RGB(0, 0, 0));
+        //bg_brush = (HBRUSH)(COLOR_BTNFACE + 1);
+        //bg_brush = CreateSolidBrush(RGB(212, 208, 200));
+        bg_brush = CreateSolidBrush(BACKGROUND);
+        icon_brush = bg_brush;
+        selection_brush = CreateSolidBrush(ITEM_BG);
+    }
+
+    FillRect(gdi->hdc, &rc, bg_brush);
+
+    //rc.bottom = rc.bottom - (ver / 2);
+
+    linked_window_t *window;
+
+    i = 0;
+    window = &windows.array[0]; // windows->array[0] is always a top window because it is necessarily the first window of its app in the list
+    while (window) {
+
+        // Draw selection rectangle
+        linked_window_t *top1 = find_first(window, false);
+        linked_window_t *top2 = find_first(selection->window, false);
+        if (top1 == top2) { // Check if the windows are the same app
+
+            //int center = (width * i) + (width / 2) + (hor * i);
+
+            //rc.left = hor + center - (width / 2);// -width; // - width means make the rect wider to the left
+            //rc.right = hor + center + (width / 2);// +width; // + width means make the rect wider to the right
+
+            int x = (HORI_PAD + ICON_WIDTH) * i;
+
+            RECT rc2 = (RECT){
+                .left = x + 8,
+                .top = rc.top + 8 + 4,
+                .right = x + 64 + HORI_PAD + 8,
+                .bottom = rc.top + 64 + HORI_PAD + 8 + 4
+            };
+            //rc2.left += 32;
+            //rc2.right -= 32;
+            //FillRect(gdi->hdc, &rc2, CreateSolidBrush(RGB(200, 200, 200)));
+            //SelectObject(gdi->hdc, GetStockObject(GRAY_BRUSH));
+
+            HPEN new_pen = CreatePen(PS_SOLID, OUTLINE, HIGHLIGHT);
+            HPEN old_pen = (HPEN)SelectObject(gdi->hdc, new_pen);
+            HBRUSH new_brush = CreateSolidBrush(ITEM_BG);
+            HBRUSH old_brush = (HBRUSH)SelectObject(gdi->hdc, new_brush);
+            RoundRect(gdi->hdc, rc2.left, rc2.top, rc2.right, rc2.bottom, ROUNDED, ROUNDED);
+        }
+
+        if (window->next_top_window) {
+            window = window->next_top_window;
+            i++;
+        } else {
+            break;
+        }
+    }
+
+    rc.bottom = rc.bottom - 4; //(ver / 2);
+    i = 0;
+    window = &windows.array[0]; // windows->array[0] is always a top window because it is necessarily the first window of its app in the list
+    while (window) {
+
+        int center = (width * i) + (width / 2) + (hor * i);
+
+        rc.left = hor + center - (width / 2) - width; // - width means make the rect wider to the left
+        rc.right = hor + center + (width / 2) + width; // + width means make the rect wider to the right
+
+        linked_window_t *top1 = find_first(window, false);
+        linked_window_t *top2 = find_first(selection->window, false);
+
+        if (top1 == top2) {
+            icon_brush = selection_brush;
+        } else {
+            icon_brush = bg_brush;
+        }
+
+        // Draw icon
+        void *hico = window->hico;//icon(window->exe_path.text, window->hwnd);
+        DrawIconEx(gdi->hdc, hor + (width * i) + (hor * i), ver, hico, ICON_WIDTH, ICON_WIDTH, 0, icon_brush, DI_NORMAL);
+
+        // Draw app name
+        if (top1 == top2) { // Check if the windows are the same app
+            wchar_t *title;
+            if (window->app_name.ok) {
+                title = window->app_name.text;
+            } else {
+                title = window->exe_name.text;
+            }
+            rc.bottom -= 3;
+            //LOGFONT logfont;
+            //GetObject(hFont, sizeof(LOGFONT), &logfont);
+
+            SelectObject(gdi->hdc, GetStockObject(DEFAULT_GUI_FONT)); // TODO / BUG Leaks, I believe? Have to capture and later release return value when selecting object?
+            //SelectObject(gdi->hdc, GetFont(L"Microsoft Sans Serif", 15));
+            SetTextColor(gdi->hdc, TEXT_COLOR);
+            //SetBkColor(gdi->hdc, RGB(200, 200, 200));
+            SetBkColor(gdi->hdc, ITEM_BG);
+            SetBkMode(gdi->hdc, TRANSPARENT);
+
+            // TODO Adjust centered text to align with left-most and right-most edges of window
+            //print(L"%d, %d, %d, %d\n", rc.left, rc.top, rc.right, rc.bottom);
+            if (rc.left < 0) {
+                //rc.right += abs(rc.left);
+                //rc.left = 0;
+                //print(L"%d, %d, %d, %d\n", rc.left, rc.top, rc.right, rc.bottom);
+            } else if (rc.right > rect.right) {
+                //rc.left -= rc.right - rect.right; // TODO Fix up messy code: rc is modified rect, rect is "client rect"
+                //rc.right = rect.right;
+                //print(L"%d, %d, %d, %d\n", rc.left, rc.top, rc.right, rc.bottom);
+            }
+
+            DrawTextW(gdi->hdc, title, -1, &rc, DT_CENTER | DT_SINGLELINE | DT_BOTTOM);
+        }
+
+        if (window->next_top_window) {
+            window = window->next_top_window;
+            i++;
+        } else {
+            break;
+        }
+    }
+}
+
+
 static bool get_key(keyboard_t *keyboard, vkcode key) {
     return BITTEST(keyboard->keys, key);
 }
@@ -1096,6 +1097,34 @@ static bool set_key(keyboard_t* keyboard, vkcode key, bool down) {
         BITCLEAR(keyboard->keys, key);
     }
     return already_down && down; // return whether this was a key repeat
+}
+
+
+static void autorun(bool enabled, wchar_t *reg_key_name) {
+
+    // TODO For callsite ergonomics, take "args" (below) as function parameter instead
+
+    // Assemble the target (filepath + args) for the autorun reg key
+
+    wchar_t path[MAX_PATH]; // path
+    wchar_t args[] = L"--autorun"; // args
+    wchar_t target[sizeof path + sizeof args]; // path + args
+
+    GetModuleFileNameW(NULL, path, sizeof path / sizeof * path); // get filepath of current module
+    StringCchPrintfW(target, sizeof target / sizeof * target, L"\"%s\" %s", path, args); // "sprintf"
+
+    HKEY reg_key;
+    LSTATUS success; // BUG Not checking 'success' below
+
+    if (enabled) {
+        success = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, NULL, 0, KEY_SET_VALUE, NULL, &reg_key, NULL);
+        success = RegSetValueExW(reg_key, reg_key_name, 0, REG_SZ, target, sizeof target);
+        success = RegCloseKey(reg_key);
+    } else {
+        success = RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_ALL_ACCESS, &reg_key);
+        success = RegDeleteValueW(reg_key, reg_key_name);
+        success = RegCloseKey(reg_key);
+    }
 }
 
 
@@ -1330,35 +1359,6 @@ static intptr_t WndProc(void *hwnd, unsigned message, intptr_t wParam, intptr_t 
         default: {
             return DefWindowProcW(hwnd, message, wParam, lParam);
         }
-    }
-}
-
-
-
-static void autorun(bool enabled, wchar_t *reg_key_name) {
-
-    // TODO For callsite ergonomics, take "args" (below) as function parameter instead
-
-    // Assemble the target (filepath + args) for the autorun reg key
-
-    wchar_t path[MAX_PATH]; // path
-    wchar_t args[] = L"--autorun"; // args
-    wchar_t target[sizeof path + sizeof args]; // path + args
-
-    GetModuleFileNameW(NULL, path, sizeof path / sizeof * path); // get filepath of current module
-    StringCchPrintfW(target, sizeof target / sizeof * target, L"\"%s\" %s", path, args); // "sprintf"
-
-    HKEY reg_key;
-    LSTATUS success; // BUG Not checking 'success' below
-
-    if (enabled) {
-        success = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, NULL, 0, KEY_SET_VALUE, NULL, &reg_key, NULL);
-        success = RegSetValueExW(reg_key, reg_key_name, 0, REG_SZ, target, sizeof target);
-        success = RegCloseKey(reg_key);
-    } else {
-        success = RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_ALL_ACCESS, &reg_key);
-        success = RegDeleteValueW(reg_key, reg_key_name);
-        success = RegCloseKey(reg_key);
     }
 }
 
