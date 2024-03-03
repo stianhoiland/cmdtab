@@ -6,6 +6,7 @@ typedef struct linked_window linked_window_t;
 typedef struct windows windows_t;
 typedef struct selection selection_t;
 typedef struct keyboard keyboard_t;
+typedef struct style style_t;
 typedef struct gdi gdi_t;
 typedef struct config config_t;
 
@@ -42,17 +43,26 @@ struct linked_window {
 
 struct windows {
 	linked_window_t array[256]; // How many (filtered!) windows do you really need?!
-	int count;
+	int num_windows; // # of windows in 'array', i.e. 'count'
+	int num_apps; // # of top-level windows
 };
 
 struct selection {
 	linked_window_t *window; // Rename 'current'?
 	linked_window_t *restore; // Rename 'initial'?
-	bool active;
 };
 
 struct keyboard {
 	char keys[32]; // 256 bits for tracking key repeat
+};
+
+struct style {
+	int height;
+	int icon_width;
+	int padding_top;
+	int padding_right;
+	int padding_bottom;
+	int padding_left;
 };
 
 struct gdi {
@@ -74,8 +84,9 @@ struct config {
 	bool wrap_bump;
 	//bool fast_switching; // BUG / TODO Doesn't work. Have to find a way to show windows without changing their Z-Order (i.e. "previewing" them)
 	bool ignore_minimized; // TODO? Atm, 'ignore_minimized' affects both Alt+` and Alt+Tab (which may be unexpected. Maybe it should only apply to subwindow switching? Etc.) TODO Should this be called 'restore_minimized'?
-	unsigned gui_delay;
+	unsigned gui_delay; // TODO Just use int?
 	//wchar_t blacklist[32][(MAX_PATH*1)+1];
+	style_t style; // TODO Maybe not put in config_t?
 };
 
 //==============================================================================
@@ -96,6 +107,8 @@ static windows_t windows; // Filtered windows, as returned by EnumWindows(), fil
 static selection_t selection; // State for currently selected window
 
 static keyboard_t keyboard; // Must manually track key repeat for the low-level keyboard hook
+
+//static style_t style; // TODO Maybe put in config_t?
 
 static gdi_t gdi; // Off-screen bitmap used for double-buffering
 
@@ -162,11 +175,11 @@ static void SetForegroundWindow_ALTHACK(void *hwnd) {
 static title_t title(void *hwnd) {
 	title_t title = {
 		.text = {0},
-		.length = countof(((title_t *)0)->text), // BUG / TODO Wait, does size need -1 here or bellow?
+		.length = {0},
 		.ok = {0}
 	};
-	title.length = GetWindowTextLengthW(hwnd); // Size [in characters!]
-	title.ok = GetWindowTextW(hwnd, title.text, title.length) > 0; // Length param: "The maximum number of characters to copy to the buffer, including the null character." (docs)
+	title.length = GetWindowTextW(hwnd, title.text, countof(title.text));
+	title.ok = (title.length > 0);
 	return title;
 }
 
@@ -272,11 +285,25 @@ static path_t appname(wchar_t *path) {
 		goto done;
 	}
 	wsprintfW(buffer, L"\\StringFileInfo\\%04x%04x\\FileDescription", translate[0].wLanguage, translate[0].wCodePage);
+	
 	if (!VerQueryValueW(version, buffer, (void *)&result, &length)) {
 		goto done;
 	}
 	if (!length || !result) {
 		goto done;
+	}
+
+	if (length == 1) {
+		// Fall back to 'ProductName' if 'FileDescription' is empty
+		// Example: Github Desktop
+		wsprintfW(buffer, L"\\StringFileInfo\\%04x%04x\\ProductName", translate[0].wLanguage, translate[0].wCodePage);
+		
+		if (!VerQueryValueW(version, buffer, (void *)&result, &length)) {
+			goto done;
+		}
+		if (!length || !result) {
+			goto done;
+		}
 	}
 
 	name.length = length;
@@ -307,6 +334,9 @@ static void *icon(wchar_t *path, void *hwnd) {
 	//   "You must initialize Component Object Model (COM) with CoInitialize or
 	//    OleInitialize prior to calling SHGetFileInfo." (docs)
 	//
+	// NOTE: Can also check out SHDefExtractIcon()
+	//       https://devblogs.microsoft.com/oldnewthing/20140501-00/?p=1103
+	//
 	if (FAILED(CoInitialize(NULL))) { // In case we use COM
 		return NULL;
 	}
@@ -316,7 +346,7 @@ static void *icon(wchar_t *path, void *hwnd) {
 		return NULL;
 	}
 	IImageList *piml = {0};
-	if (FAILED(SHGetImageList(SHIL_JUMBO, &IID_IImageList, (void **)(&piml)))) {
+	if (FAILED(SHGetImageList(SHIL_JUMBO, &IID_IImageList, (void **)&piml))) {
 		return NULL;
 	}
 	HICON hico = {0};
@@ -370,30 +400,15 @@ static void defaults(config_t *config) {
 			L"ApplicationFrameHost.exe", // BUG Oof, this one is too heavy-handed. This excludes Calculator, for example. Have to find a better way to deal with UWP windows
 		}
 		*/
+		.style = (style_t){
+			.height = 155,
+			.icon_width = 64,
+			.padding_top = 0,
+			.padding_right = 8,
+			.padding_bottom = 0,
+			.padding_left = 8,
+		},
 	};
-}
-
-static int numapps(windows_t *windows) {
-	// TODO Don't use numapps() and width(); figure out something more elegant
-	linked_window_t *window = &windows->array[0]; // windows->array[0] is always a top window because it is necessarily the first window of its app in the list
-	int num_apps = 0;
-	while (window) {
-		num_apps++;
-		if (window->next_top_window) {
-			window = window->next_top_window;
-		} else {
-			break;
-		}
-	}
-	return num_apps;
-}
-
-static int width(windows_t *windows) {
-	int icon_width = 64;
-	int horz_pad = 16;
-	int count = numapps(windows);
-
-	return (icon_width * count) + (horz_pad * count) + (horz_pad * 2);
 }
 
 
@@ -416,9 +431,13 @@ static void peek_hwnd(void *hwnd) {
 
 }
 */
-static void size_gui(void) {
-	int w = width(&windows); // See width() :(
-	int h = 155;
+static void size_gui(style_t *style, int num_apps) {
+	int    icon_width = num_apps *  style->icon_width;
+	int padding_width = num_apps * (style->padding_left + style->padding_right);
+	int  margin_width =        2 * (style->padding_left + style->padding_right);
+
+	int w = icon_width + padding_width + margin_width;
+	int h = style->height;
 	int x = GetSystemMetrics(SM_CXSCREEN) / 2 - (w / 2);
 	int y = GetSystemMetrics(SM_CYSCREEN) / 2 - (h / 2);
 	MoveWindow(hMainWindow, x, y, w, h, false);
@@ -464,105 +483,47 @@ static bool filter(void *hwnd) {
 		return false;
 	}
 
-	// Window must be visible. It's not enough to check WS_VISIBLE. Must use
-	// IsWindowVisible(), which also checks full window hierarchy (I think
-	// that's what IsWindowVisible() does?)
-	//if (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_VISIBLE) {
-		//return false;
-	//}
+	// Here starts the witch hunt of eliminating unsightly windows through
+	// arcane spells and incantations 
 
-
-	// Ignore windows without title text
-	//if (GetWindowTextLengthW(hwnd) == 0) {
-		//return false;
-	//}
-
-	// Ignore desktop window
-	//if (GetShellWindow() == hwnd) {
-		//return false;
-	//}
-
-	// Ignore ourselves (we don't need to, because atm we only load windows and
-	// filter them while our window is not visible). Also, we're a
-	// WS_EX_TOOLWINDOW (see below)
-	//if (hwnd == hMainWindow) { // TODO After nailing down the other filters, test if this is necessary anymore
-		//return false;
-	//}
-
-	//if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) {
-		//return false;
-	//}
-
-
-
-	//if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_NOACTIVATE) {
-		//return false;
-	//}
-
-	// Omg, this one gets rid of many things that shouldn't appear in Alt-Tab
-	// EDIT Oh noes, Calculator disappears!
-	/*
-	if (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_POPUP) {
-		//return false;
+	path_t exe_path = path(hwnd);
+	path_t exe_name = filename(exe_path.text, false);
+	if (!exe_path.ok || !exe_name.ok) {
+		print(L"whoops, bad exe path?! %p\n", hwnd);
+		return;
 	}
-	*/
-	/*
-	if ((GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD) && !(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_APPWINDOW)) { // TODO We should actually ignore WS_CHILD if the window has WS_EX_APPWINDOW
-		debug(); // This shouldn't happen, as we're using EnumWindows(), which doesn't enumerate child windows
+
+	wchar_t class_name[MAX_PATH] = {0};
+	GetClassNameW(hwnd, class_name, countof(class_name));
+
+	bool corewindow = wcscmp(class_name, L"Windows.UI.Core.CoreWindow") == 0;
+	
+	if (corewindow) {
 		return false;
 	}
-	*/
-	// Window should have no owner (i.e. be a "top-level window")
+
+	bool afw = wcscmp(class_name, L"ApplicationFrameWindow") == 0;
+	bool explorer = wcscmp(exe_name.text, L"explorer") == 0;
+
+	if (afw && explorer) {
+		return false;
+	}
+
+
 	/*
-	HWND owner1 = GetWindow(hwnd, GW_OWNER);
-	HWND owner2 = GetAncestor(hwnd, GA_ROOTOWNER);
-	if (owner1 != NULL || owner2 != hwnd) {
-		//debug(); // This shouldn't happen, as we're using EnumWindows(), which
-				   // (mostly) enumerates top-level windows.
-				   // Huh, it does happen! (When Windows' Alt-Tab is open??)
+	if (!(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_OVERLAPPEDWINDOW)) {
 		return false;
 	}
 	*/
 
-	/*
-	WINDOWPLACEMENT placement = {0};
-	bool success = GetWindowPlacement(hwnd, &placement);
-	RECT rect = placement.rcNormalPosition;
-	int width = rect.right - rect.left;
-	int height = rect.bottom - rect.top;
-	int size = width + height;
-	if (size < 100) { // window is less than 100 pixels
-		return false;
-	}
-	*/
-
-	/* Raymond Chen - Which windows appear in the Alt+Tab list?
-	// Start at the root owner
-	HWND hwndWalk = GetAncestor(hwnd, GA_ROOTOWNER);
-	// See if we are the last active visible popup
-	HWND hwndTry;
-	while ((hwndTry = GetLastActivePopup(hwndWalk))!=hwndTry) {
-		if (IsWindowVisible(hwndTry)) {
-			break;
-		}
-		hwndWalk = hwndTry;
-	}
-	return (hwndWalk == hwnd);
-	*/
 
 	return true;
 }
-
 
 static void add(windows_t *windows, void *hwnd) {
 	path_t exe_path = path(hwnd);
 
 	if (!exe_path.ok) {
-		// IMPORTANT! Although there are comments elsewhere that 'exe_path'
-		//            field is just for dbg'ing, here we use it to avoid
-		//            adding problematic windows/processes to the window
-		//            list, and fail gracefully by simply excluding them
-		//            from the switcher.
 		print(L"whoops, bad exe path?! %p\n", hwnd);
 		return;
 	}
@@ -578,8 +539,7 @@ static void add(windows_t *windows, void *hwnd) {
 	//* dbg */     print(L"%s (%i) %s\n", app_name.ok ? L"ok" : L"NOT OK", app_name.length, exe_name.text);
 	//* dbg */ }
 
-	linked_window_t *window = &windows->array[windows->count];
-	windows->count++;
+	linked_window_t *window = &windows->array[windows->num_windows];
 	window->exe_path = exe_path;
 	window->exe_name = exe_name;
 	window->app_name = app_name;
@@ -590,9 +550,15 @@ static void add(windows_t *windows, void *hwnd) {
 	window->prev_sub_window = NULL;
 	window->next_top_window = NULL;
 	window->prev_top_window = NULL;
-}
 
-static void link(windows_t *windows) {
+	windows->num_windows++;
+
+	if (windows->num_windows == 1) {
+		windows->num_apps = 1;
+	}
+
+	// NOTE Previously link():
+
 	//
 	// A top window is the first window of its app in the windows list (the
 	//  order of the window list is determined by EnumWindows())
@@ -610,55 +576,44 @@ static void link(windows_t *windows) {
 	//        ↓
 	//   sub_window
 	//
-	if (windows->count < 2) {
-		return;
+	if (windows->num_windows < 2) {
+		return; // Skip linking when there is only 1 or 0 windows
 	}
-	for (int i = 1; i < windows->count; i++) {
-		linked_window_t *window1 = &windows->array[0]; // windows->array[0] is always a top window because it is necessarily the first window of its app in the list
-		linked_window_t *window2 = &windows->array[i];
-		if (!window1->exe_path.ok || !window2->exe_path.ok) {
-			print(L"ERROR whoops, bad exe paths?! %p %p\n", window1->hwnd, window2->hwnd);
-			return; // BUG Use assert, i.e. crash()
+	linked_window_t *window1 = &windows->array[0];
+	linked_window_t *window2 = window;
+	while (window1) {
+		if (patheq(&window1->exe_path, &window2->exe_path)) {
+			while (window1->next_sub_window) { window1 = window1->next_sub_window; } // Get last subwindow of window1
+			window1->next_sub_window = window2;
+			window2->prev_sub_window = window1;
+			break;
 		}
-		// Determine if window2 is either
-		//  a) of the same app as a prior top window (i.e. a sub window)
-		//  b) the first window of its app in the window list (i.e. a top window)
-		while (window1) {
-			if (patheq(&window1->exe_path, &window2->exe_path)) {
-				// a)
-				while (window1->next_sub_window) { window1 = window1->next_sub_window; } // Get last subwindow of window1 (since window1 is a top window)
-				window1->next_sub_window = window2;
-				window2->prev_sub_window = window1;
-				break;
-			}
-			if (window1->next_top_window) {
-				window1 = window1->next_top_window; // Check next top window
-			} else {
-				break;
-			}
+		if (window1->next_top_window) {
+			window1 = window1->next_top_window; // Check next top window
+		} else {
+			break;
 		}
-		if (window2->prev_sub_window == NULL) {
-			// b) window2 was not assigned a previous window of the same app, thus window2 is a top window
-			window2->prev_top_window = window1;
-			window1->next_top_window = window2;
-		}
+	}
+	// window2 was not assigned a previous window of the same app, thus window2 is a top window
+	if (window2->prev_sub_window == NULL) {
+		window2->prev_top_window = window1;
+		window1->next_top_window = window2;
+		windows->num_apps++;
 	}
 }
 
-static void wipe(windows_t *windows) {
-	for (int i = 0; i < windows->count; i++) {
+static void rebuild(windows_t *windows) {
+	// NOTE Previously wipe():
+	for (int i = 0; i < windows->num_windows; i++) {
 		if (windows->array[i].hico) {
 			DestroyIcon(windows->array[i].hico);
 		}
 	}
-	windows->count = 0;
-}
+	windows->num_windows = 0;
+	windows->num_apps = 0;
 
-static void rebuild(windows_t *windows) {
 	// Rebuild our whole window list
-	wipe(windows);
 	EnumWindows(EnumProc, 0); // EnumProc() calls filter() and add()
-	link(windows);
 }
 
 static BOOL EnumProc(HWND hWnd, LPARAM lParam) {
@@ -699,27 +654,30 @@ static void print_window(linked_window_t *window, bool details) {
 				ex_toolwindow, ex_appwindow, ex_dlgmodalframe, ex_layered, ex_noactivate, ex_palettewindow, ex_overlappedwindow);
 		}
 		wchar_t *ws_iconic = (GetWindowLongPtrW(window->hwnd, GWL_STYLE) & WS_ICONIC) ? L"(minimized)" : L"";
-		print(L"%s %s \"%s\" - %s\n", ws_iconic, window->exe_name.text, window->title.text, window->exe_path.text);
+		wchar_t class_name[MAX_PATH] = {0};
+		GetClassNameW(window->hwnd, class_name, countof(class_name));
+		print(L"%s %s %s \"%s\" - %s\n", ws_iconic, class_name, window->exe_name.text, window->title.text, window->exe_path.text);
 	} else {
 		print(L"NULL window\n");
 	}
 }
 
-static void print_all(windows_t *windows, bool fancy) {
+static void print_all(windows_t *windows, bool fancy, bool details) {
 	double mem = (double)(
 		sizeof *windows +
 		sizeof selection +
 		sizeof keyboard +
+		//sizeof style + // TDODO Depends on whether style is in config_t or not
 		sizeof gdi +
 		sizeof config) / 1024; // TODO Referencing global vars
-	print(L"%i Alt-Tab windows (%.0fkb mem):\n", windows->count, mem);
+	print(L"%i Alt-Tab windows (%.0fkb mem):\n", windows->num_windows, mem);
 
 	if (!fancy) {
 		// Just dump the array
-		for (int i = 0; i < windows->count; i++) {
+		for (int i = 0; i < windows->num_windows; i++) {
 			linked_window_t *window = &windows->array[i];
 			print(L"%i ", i);
-			print_window(window, false);
+			print_window(window, details);
 		}
 	} else {
 		// Dump the linked list
@@ -746,7 +704,7 @@ static void print_all(windows_t *windows, bool fancy) {
 
 
 static linked_window_t *find_hwnd(windows_t *windows, void *hwnd) {
-	for (int i = 0; i < windows->count; i++) {
+	for (int i = 0; i < windows->num_windows; i++) {
 		if (windows->array[i].hwnd == hwnd) {
 			return &windows->array[i];
 		}
@@ -775,11 +733,10 @@ static linked_window_t *find_last(linked_window_t *window, bool top_level) {
 }
 
 static linked_window_t *find_next(linked_window_t *window, bool top_level, bool reverse_direction, bool allow_wrap) {
-	// TODO / BUG Handle NULL window, i.e. there are NO windows to switch to
-
-	//if (window == NULL) {
-		//print(L"window is NULL");
-	//}
+	if (window == NULL) {
+		print(L"window is NULL");
+		return NULL;
+	}
 
 	if (top_level) {
 		// Ensure that 'window' is its app's top window
@@ -800,16 +757,20 @@ static linked_window_t *find_next(linked_window_t *window, bool top_level, bool 
 		return next_window;
 	}
 
-	if (!allow_wrap) { // '!next_window' implied
+	// No next window. Should we wrap around?
+
+	if (!allow_wrap) { 
 		return window;
 	}
 
 	bool alone;
 
 	if (top_level) {
-		alone = !window->next_top_window && !window->prev_top_window; // All alone on the top :(
+		// Are we the only top level window? All alone on the top :(
+		alone = !window->next_top_window && !window->prev_top_window; 
 	} else {
-		alone = !window->next_sub_window && !window->prev_sub_window; // Top looking for sub ;)
+		// Are we the only window of this app? Top looking for sub ;)
+		alone = !window->next_sub_window && !window->prev_sub_window; 
 	}
 
 	if (!alone) { // '!next_window && allow_wrap' implied
@@ -827,35 +788,34 @@ static linked_window_t *find_next(linked_window_t *window, bool top_level, bool 
 static void select_null(selection_t *selection) {
 	selection->window = NULL;
 	selection->restore = NULL;
-	selection->active = false;
 }
 
 static void select_foreground(selection_t *selection) {
 	linked_window_t *foreground = find_hwnd(&windows, GetForegroundWindow());
+	
+	// TODO Hmm, make this more robust?
 	if (foreground == NULL) {
-		// TODO / BUG  What do when no foreground window find, because foreground window filtered OUT??
-		// TODO / BUG  I'm not sure this is ok:
-		foreground = &windows.array[0]; // BUG Can stil be empty
-		// TODO / BUG Is this better??
-		//foreground = GetTopWindow(GetDesktopWindow());
+		foreground = &windows.array[0];
 	}
+	
+	// Select foreground window or NULL
 	selection->window = foreground;
 	selection->restore = foreground;
-	selection->active = (foreground != NULL);
 
 	if (foreground == NULL) {
 		// dbg There are no windows (akshually, none of the filtered windows is the foreground window)
-		/* dbg */ print(L"whoops, we can't find the foreground window");
+		/* dbg */ print(L"whoops, we can't find the foreground window\n");
 	} else {
 		/* dbg */ print(L"foreground window: ");
 		/* dbg */ print_window(selection->window, false);
 	}
 }
 
+// Commit message for aeee53b ("Second cleanup") missed "refactor: remove should_switch & open_gui args from select_next()
 static void select_next(selection_t *selection, bool top_level, bool reverse_direction, bool allow_wrap) {
-	linked_window_t *new = find_next(selection->window, top_level, reverse_direction, allow_wrap);
-	// Select next window
-	selection->window = new;
+	linked_window_t *next = find_next(selection->window, top_level, reverse_direction, allow_wrap);
+	// Select next window or NULL
+	selection->window = next;
 
 	///* dbg */ // sizeof: Damn that looks scary xD It's not tho--it's just getting and adding together the size of the 'text' fields of 'path_t' and 'title_t'
 	///* dbg */ wchar_t app_title[sizeof ((path_t *)0)->text + sizeof ((title_t *)0)->text + 1 + 8]; // +8
@@ -865,33 +825,16 @@ static void select_next(selection_t *selection, bool top_level, bool reverse_dir
 	///* dbg */ cpy_error = wcscat_s(app_title, sizeof ((title_t *)0)->text, selection->window->title.text);
 	///* dbg */ SetWindowTextW(hMainWindow, app_title);
 
-	/* dbg */ print(L"selected %s%s: ", top_level ? L"app" : L"subwindow", allow_wrap ? L"" : L" (repeat)");
-	/* dbg */ print_window(selection->window, false);
-
-
-	//if (config.fast_switching) {
-		//peek(selection->window->hwnd); // TODO Doesn't work yet. See config.fast_switching and peek()
-	//}
-
-	/*
-	// Alt+`
-	if (should_switch) {
-		show_hwnd(selection->window->hwnd, true); // TODO? Atm, 'ignore_minimized' is handled in filter(), which means that 'ignore_minimized' affects both Alt+` and Alt+Tab (which may be unexpected. Maybe it should only apply to subwindow switching? Etc.)
+	if (next == NULL) {
+		/* dbg */ print(L"whoops, we can't find the next window\n");
+	} else {
+		/* dbg */ print(L"selected %s%s: ", top_level ? L"app" : L"subwindow", allow_wrap ? L"" : L" (repeat)");
+		/* dbg */ print_window(selection->window, false);
 	}
-	// Alt+Tab
-	if (!should_switch) {
-		size_gui();
-		redraw(&gdi, hMainWindow, selection);
-	}
-	if (open_gui) {
-		int delay = once() ? 0 : config.gui_delay;
-		show_gui(delay);
-	}
-	*/
 }
 
 static void select_done(selection_t *selection, bool should_switch, bool should_restore) {
-	if (should_switch && selection->active) {
+	if (should_switch) {
 		if (!should_restore) {
 			// TODO When fast_switching is implemented, it should do something here
 			show_hwnd(selection->window->hwnd, true);
@@ -1096,7 +1039,7 @@ static bool set_key(keyboard_t *keyboard, vkcode key, bool down) {
 	} else {
 		BITCLEAR(keyboard->keys, key);
 	}
-	return already_down && down; // return whether this was a key repeat
+	return already_down && down; // Return whether this was a key repeat
 }
 
 
@@ -1188,7 +1131,7 @@ static intptr_t LLKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam) {
 	// [ ] Delete to close window (like Windows 10 and up)
 	// [-] Alt-F4 (atm closes cmdtab.exe)
 	// [ ] Mouse click app icon to switch
-	// [ ] Cancel switcher on mouse click outside
+	// [x] Cancel switcher on mouse click outside
 	// [ ] Close app with mouse click on a red "X" on icon
 	// [ ] Show number of subwindows for each app
 	// [ ] Show numbers on each app and allow quick jumping by pressing that number
@@ -1202,7 +1145,7 @@ static intptr_t LLKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam) {
 	//      Hanging modifiers, missing modifiers...
 	//      Passing from Windows' Alt-Tab to ours doesn't even work (oh wait, is that because Ctrl+Alt+Tab is the persistent alt tab hotkey?)
 	if (key1_down && mod1_held && ctrl_held) {
-		bool enabled = config.switch_apps = !config.switch_apps; // NOTE: Atm, we only support a hotkey for toggling app switching, not toggling window switching (cuz why would we?)
+		bool enabled = config.switch_apps = !config.switch_apps; // NOTE Atm, we only support a hotkey for toggling app switching, not toggling window switching (cuz why would we?)
 		if (!enabled) {
 			select_done(&selection, false, false);
 			return pass_message;
@@ -1216,27 +1159,35 @@ static intptr_t LLKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam) {
 	// ========================================
 	// Alt+Tab
 	if (key1_down && mod1_held && config.switch_apps) {
-		if (!selection.active) {
+		if (!selection.window) {
 			rebuild(&windows);
 			select_foreground(&selection);
+			size_gui(&config.style, windows.num_apps); // NOTE Must call size_gui() before redraw() & before show_gui()
 		}
-		select_next(&selection, true, shift_held, !config.wrap_bump || !key_repeat);
-		size_gui();
-		redraw(&gdi, hMainWindow, &selection);
-		int delay = once() ? 0 : config.gui_delay;
-		show_gui(delay);
+		if (selection.window) {
+			select_next(&selection, true, shift_held, !config.wrap_bump || !key_repeat); // TODO / BUG Could potentially leave selection->window == NULL
+			redraw(&gdi, hMainWindow, &selection);
+			int delay = once() ? 0 : config.gui_delay;
+			show_gui(delay);
+		}
+
+		//if (config.fast_switching) {
+			//peek(selection->window->hwnd); // TODO Doesn't work yet. See config.fast_switching and peek()
+		//}
 
 		//intptr_t result = CallNextHookEx(NULL, nCode, wParam, lParam); // We'll be good citizens
 		return consume_message; // Since we "own" this hotkey system-wide, we consume this message unconditionally
 	}
 	// Alt+`
 	if (key2_down && mod2_held && config.switch_windows) {
-		if (!selection.active) {
+		if (!selection.window) {
 			rebuild(&windows);
 			select_foreground(&selection);
 		}
-		select_next(&selection, false, shift_held, !config.wrap_bump || !key_repeat);
-		show_hwnd(selection.window->hwnd, true);
+		if (selection.window) {
+			select_next(&selection, false, shift_held, !config.wrap_bump || !key_repeat); // TODO / BUG Could potentially leave selection->window == NULL
+			show_hwnd(selection.window->hwnd, true);
+		}
 
 		//intptr_t result = CallNextHookEx(NULL, nCode, wParam, lParam); // We'll be good citizens
 		return consume_message; // Since we "own" this hotkey system-wide, we consume this message unconditionally
@@ -1245,8 +1196,9 @@ static intptr_t LLKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam) {
 	// Navigation
 	// ========================================
 	// Alt+arrows. People ask for this, so...
-	if (selection.active && (next_down || prev_down) && mod1_held) { // selection.active: You can't *start* window switching with Alt+arrows, but you can navigate the switcher with arrows when switching is active
+	if (selection.window && (next_down || prev_down) && mod1_held) { // selection.window: You can't *start* window switching with Alt+arrows, but you can navigate the switcher with arrows when switching is active
 		select_next(&selection, true, prev_down, !config.wrap_bump || !key_repeat);
+		redraw(&gdi, hMainWindow, &selection);
 
 		//intptr_t result = CallNextHookEx(NULL, nCode, wParam, lParam); // We'll be good citizens
 		return consume_message; // Since our swicher is active, we "own" this hotkey, so we consume this message
@@ -1266,27 +1218,27 @@ static intptr_t LLKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam) {
 	//      In short:
 	//      1) Our app never hooks Alt keydowns
 	//      2) Our app hooks Alt keyups, but always passes it through on pain of getting a stuck Alt key because of point 1
-	if (selection.active && mod1_up) {
+	if (selection.window && mod1_up) {
 		select_done(&selection, true, false);
 		return pass_message; // See note above on "Alt keyup" on why we don't consume this message
 	}
-	if (selection.active && mod2_up) {
+	if (selection.window && mod2_up) {
 		select_done(&selection, true, false);
 		return pass_message; // See note above on "Alt keyup" on why we don't consume this message
 	}
 	// Alt+Enter
-	if (selection.active && (mod1_held || mod2_held) && enter_down) {
+	if (selection.window && (mod1_held || mod2_held) && enter_down) {
 		select_done(&selection, true, false);
 		return pass_message; // See note above on "Alt keyup" on why we don't consume this message
 	}
 	// Alt+Esc
-	if (selection.active && (mod1_held || mod2_held) && esc_down) { // BUG There's a bug here if mod1 and mod2 aren't both the same key. In that case we'll still pass through the key event, even though we should own it since it's not Alt+Esc
+	if (selection.window && (mod1_held || mod2_held) && esc_down) { // BUG There's a bug here if mod1 and mod2 aren't both the same key. In that case we'll still pass through the key event, even though we should own it since it's not Alt+Esc
 		select_done(&selection, true, true);
 		//intptr_t result = CallNextHookEx(NULL, nCode, wParam, lParam); // We'll be good citizens
 		return consume_message; // We don't "own"/monopolize Alt+Esc. It's used by Windows for another, rather useful, window switching mechaninsm, and we preserve that
 	}
 	// Alt+F4 & Alt+Q
-	if (selection.active && ((mod1_held || mod2_held) && (keyF4_down || keyQ_down))) {
+	if (selection.window && ((mod1_held || mod2_held) && (keyF4_down || keyQ_down))) {
 		if (keyF4_down) {
 			print(L"F4\n");
 			SendMessageW(hMainWindow, WM_CLOSE, 0, 0);
@@ -1296,17 +1248,17 @@ static intptr_t LLKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam) {
 		}
 	}
 	// Alt+W
-	if (selection.active && ((mod1_held || mod2_held) && keyW_down)) {
+	if (selection.window && ((mod1_held || mod2_held) && keyW_down)) {
 		print(L"W\n");
 	}
 	// Alt+Delete
-	if (selection.active && ((mod1_held || mod2_held) && delete_down)) {
+	if (selection.window && ((mod1_held || mod2_held) && delete_down)) {
 		print(L"Delete\n");
 	}
 	// Sink. Consume all other keystrokes when we're activated. Maybe make this
 	// a config option in case shit gets weird with the switcher eating
 	// everything when activated
-	if (selection.active && (mod1_held || mod2_held)) {
+	if (selection.window && (mod1_held || mod2_held)) {
 		/* dbg */ //print(L"sink vkcode:%llu%s%s\n", virtual_key, key_down ? L" down" : L" up", key_repeat ? L" (repeat)" : L"");
 		return consume_message;
 	}
@@ -1376,7 +1328,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	}
 
 	// Prompt about autorun (unless we got autorun param)
-	if (wcscmp(pCmdLine, L"--autorun")) { // lstrcmpW, CompareStringW
+	if (wcscmp(pCmdLine, L"--autorun") == 0) { // lstrcmpW, CompareStringW
 		int result = MessageBoxW(NULL, L"Start cmdtab.exe automatically? (Relaunch cmdtab.exe to change your mind.)", L"cmdtab", MB_YESNO | MB_ICONQUESTION | MB_TASKMODAL);
 		switch (result) {
 			case IDYES: autorun(true, L"CmdTab");
