@@ -19,7 +19,7 @@ struct title {
 };
 
 struct path {
-	wchar_t text[(MAX_PATH * 1) + 1];
+	wchar_t text[MAX_PATH + 1];
 	unsigned long length; // QueryFullProcessImageNameW() wants 'unsigned long'
 	bool ok;
 };
@@ -37,6 +37,14 @@ struct linked_window {
 	linked_window_t *prev_top_window;
 };
 
+struct style {
+	int gui_height;
+	int gui_horz_margin;
+	int gui_vert_margin;
+	int icon_width;
+	int icon_horz_padding;
+};
+
 //==============================================================================
 // Structs for app state
 //==============================================================================
@@ -48,21 +56,13 @@ struct windows {
 };
 
 struct selection {
-	linked_window_t *window; // Rename 'current'?
-	void *restore; // Rename 'initial'?
+	linked_window_t *current;
+	bool showed;
+	void *restore;
 };
 
 struct keyboard {
 	char keys[32]; // 256 bits for tracking key repeat
-};
-
-struct style {
-	int height;
-	int icon_width;
-	int padding_top;
-	int padding_right;
-	int padding_bottom;
-	int padding_left;
 };
 
 struct gdi {
@@ -81,22 +81,25 @@ struct config {
 	vkcode key2;
 	bool switch_apps;
 	bool switch_windows;
+	bool fast_switching_apps; // BUG / TODO Not ideal. Have to find a way to show windows without changing their Z-Order (i.e. "previewing" them)
+	bool fast_switching_windows; // BUG / TODO Not ideal. Have to find a way to show windows without changing their Z-Order (i.e. "previewing" them)
+	bool gui_show_apps;
+	bool gui_show_windows;
+	int  gui_delay;
 	bool wrap_bump;
-	//bool fast_switching; // BUG / TODO Doesn't work. Have to find a way to show windows without changing their Z-Order (i.e. "previewing" them)
 	bool ignore_minimized; // TODO? Atm, 'ignore_minimized' affects both Alt+` and Alt+Tab (which may be unexpected. Maybe it should only apply to subwindow switching? Etc.) TODO Should this be called 'restore_minimized'?
-	unsigned gui_delay; // TODO Just use int?
 	//wchar_t blacklist[32][(MAX_PATH*1)+1];
 	style_t style; // TODO Maybe not put in config_t?
 };
 
 //==============================================================================
-// Global Windows API handles
+// Global variables for Windows API handles
 //==============================================================================
 
-static void *hMutexHandle;
-static void *hMainInstance;
+//static void *hMutexHandle;
+//static void *hMainInstance;
 static void *hMainWindow;
-static void *hKeyboardHook;
+//static void *hKeyboardHook;
 
 //==============================================================================
 // Global variables for app state
@@ -138,16 +141,6 @@ static void print(wchar_t *fmt, ...) {
 	OutputDebugStringW(wcs);
 }
 
-static bool once(void) {
-	static bool first = true;
-	if (first) {
-		first = !first;
-		return true;
-	} else {
-		return false;
-	}
-}
-
 static void SetForegroundWindow_ALTHACK(void *hwnd) {
 	// TODO / BUG / HACK!
 	// Oof, the rabbit hole...
@@ -163,9 +156,12 @@ static void SetForegroundWindow_ALTHACK(void *hwnd) {
 	// et al. from our window's WndProc. I think this more correct
 	// implementation is rather trivial to set up, but I can't be bothered right
 	// now. So, Alt key hack it is.
-	keybd_event(VK_MENU, 0x38, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0);
-
+	
+	///* dbg */ print(L"alt down\n");
+	keybd_event(VK_MENU, 0, KEYEVENTF_EXTENDEDKEY | 0, 0);
 	SetForegroundWindow(hwnd);
+	keybd_event(VK_MENU, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0);
+	///* dbg */ print(L"alt up\n");
 }
 
 //==============================================================================
@@ -389,10 +385,13 @@ static void defaults(config_t *config) {
 		.key2 = MapVirtualKeyW(0x29, MAPVK_VSC_TO_VK_EX),
 		.switch_apps = true,
 		.switch_windows = true,
+		.fast_switching_apps = false, // BUG / TODO Not ideal. Have to find a way to show windows without changing their Z-Order (i.e. "previewing" them)
+		.fast_switching_windows = true, // BUG / TODO Not ideal. Have to find a way to show windows without changing their Z-Order (i.e. "previewing" them)
+		.gui_show_apps = true,
+		.gui_show_windows = false,
+		.gui_delay = 0,
 		.wrap_bump = true,
-		//.fast_switching = false, // BUG / TODO Doesn't work. Have to find a way to show windows without changing their Z-Order (i.e. "previewing" them)
 		.ignore_minimized = false, // NOTE Currently only observed for subwindow switching and BUG! Move ignore_minimized handling from show() -> selectnext()
-		.gui_delay = 150,
 		/*
 		.blacklist = { // TODO blacklist isn't implemented yet
 			L"TextInputHost.exe",
@@ -401,12 +400,11 @@ static void defaults(config_t *config) {
 		}
 		*/
 		.style = (style_t){
-			.height = 155,
+			.gui_height = 128,
 			.icon_width = 64,
-			.padding_top = 0,
-			.padding_right = 8,
-			.padding_bottom = 0,
-			.padding_left = 8,
+			.icon_horz_padding = 8,
+			.gui_horz_margin = 24,
+			.gui_vert_margin = 32,
 		},
 	};
 }
@@ -431,35 +429,30 @@ static void peek_hwnd(void *hwnd) {
 
 }
 */
-static void size_gui(style_t *style, int num_apps) {
-	int    icon_width = num_apps *  style->icon_width;
-	int padding_width = num_apps * (style->padding_left + style->padding_right);
-	int  margin_width =        2 * (style->padding_left + style->padding_right);
+static void size_gui(void *hwnd, style_t *style, int num_apps) {
+	int    icon_width = num_apps * style->icon_width;
+	int padding_width = num_apps * style->icon_horz_padding * 2;
+	int  margin_width =        2 * style->gui_horz_margin;
 
 	int w = icon_width + padding_width + margin_width;
-	int h = style->height;
+	int h = style->gui_height;
 	int x = GetSystemMetrics(SM_CXSCREEN) / 2 - (w / 2);
 	int y = GetSystemMetrics(SM_CYSCREEN) / 2 - (h / 2);
-	MoveWindow(hMainWindow, x, y, w, h, false);
+	
+	MoveWindow(hwnd, x, y, w, h, false);
 }
 
-static void show_gui(unsigned delay) {
-	KillTimer(hMainWindow, 1);
+static void show_gui(void *hwnd, unsigned delay) {
+	KillTimer(hwnd, 1);
 	if (delay > 0) {
-		SetTimer(hMainWindow, 1, delay, TimerProc);
+		SetTimer(hwnd, 1, delay, TimerProc);
 		return;
 	}
-	ShowWindow(hMainWindow, SW_SHOW);
-	SetForegroundWindow(hMainWindow);
-}
-
-static void hide_gui(void) {
-	KillTimer(hMainWindow, 1);
-	ShowWindow(hMainWindow, SW_HIDE); // Yes, call ShowWindow() to hide window...
+	show_hwnd(hwnd, true);
 }
 
 static VOID TimerProc(HWND hWnd, UINT uMessage, UINT_PTR uEventId, DWORD dwTime) {
-	show_gui(0);
+	show_gui(hWnd, 0);
 }
 
 
@@ -490,22 +483,17 @@ static bool filter(void *hwnd) {
 	path_t exe_name = filename(exe_path.text, false);
 	if (!exe_path.ok || !exe_name.ok) {
 		print(L"whoops, bad exe path?! %p\n", hwnd);
-		return;
+		return false;
 	}
 
 	wchar_t class_name[MAX_PATH] = {0};
 	GetClassNameW(hwnd, class_name, countof(class_name));
 
-	bool corewindow = wcscmp(class_name, L"Windows.UI.Core.CoreWindow") == 0;
-	
-	if (corewindow) {
-		return false;
-	}
+	#define wcseq(str1, str2) wcscmp(str1, str2) == 0
 
-	bool afw = wcscmp(class_name, L"ApplicationFrameWindow") == 0;
-	bool explorer = wcscmp(exe_name.text, L"explorer") == 0;
-
-	if (afw && explorer) {
+	if (wcseq(class_name, L"Windows.UI.Core.CoreWindow") ||
+		wcseq(class_name, L"ApplicationFrameWindow") && wcseq(exe_name.text, L"explorer") ||
+		wcseq(class_name, L"Xaml_WindowedPopupClass")) {
 		return false;
 	}
 
@@ -629,34 +617,54 @@ static BOOL EnumProc(HWND hWnd, LPARAM lParam) {
 }
 
 
-static void print_window(linked_window_t *window, bool details) {
-	if (window) {
+static void print_hwnd(void *hwnd, bool details) {
+	if (hwnd) {
+		path_t exe_path = path(hwnd);
+		path_t exe_name = filename(exe_path.text, false);
+		title_t window_title = title(hwnd);
+		wchar_t *ws_iconic = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_ICONIC) ? L" (minimized)" : L"";
+		print(L"%s%s \"%s\"\n", exe_name.text, ws_iconic,  window_title.text, exe_path.text);
 		if (details) {
-			wchar_t *visible             = (GetWindowLongPtrW(window->hwnd, GWL_STYLE) & WS_VISIBLE) ? L"visible" : L"";
-			wchar_t *child               = (GetWindowLongPtrW(window->hwnd, GWL_STYLE) & WS_CHILD) ? L", child" : L"";
-			wchar_t *disabled            = (GetWindowLongPtrW(window->hwnd, GWL_STYLE) & WS_DISABLED) ? L", disabled" : L"";
-			wchar_t *popup               = (GetWindowLongPtrW(window->hwnd, GWL_STYLE) & WS_POPUP) ? L", popup" : L"";
-			wchar_t *popupwindow         = (GetWindowLongPtrW(window->hwnd, GWL_STYLE) & WS_POPUPWINDOW) ? L", popupwindow" : L"";
-			wchar_t *tiled               = (GetWindowLongPtrW(window->hwnd, GWL_STYLE) & WS_TILED) ? L", tiled" : L"";
-			wchar_t *tiledwindow         = (GetWindowLongPtrW(window->hwnd, GWL_STYLE) & WS_TILEDWINDOW) ? L", tiledwindow" : L"";
-			wchar_t *overlapped          = (GetWindowLongPtrW(window->hwnd, GWL_STYLE) & WS_OVERLAPPED) ? L", overlapped" : L"";
-			wchar_t *overlappedwindow    = (GetWindowLongPtrW(window->hwnd, GWL_STYLE) & WS_OVERLAPPEDWINDOW) ? L", overlappedwindow" : L"";
-			wchar_t *dlgframe            = (GetWindowLongPtrW(window->hwnd, GWL_STYLE) & WS_DLGFRAME) ? L", dlgframe" : L"";
-			wchar_t *ex_toolwindow       = (GetWindowLongPtrW(window->hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) ? L", ex_toolwindow" : L"";
-			wchar_t *ex_appwindow        = (GetWindowLongPtrW(window->hwnd, GWL_EXSTYLE) & WS_EX_APPWINDOW) ? L", ex_appwindow" : L"";
-			wchar_t *ex_dlgmodalframe    = (GetWindowLongPtrW(window->hwnd, GWL_EXSTYLE) & WS_EX_DLGMODALFRAME) ? L", ex_dlgmodalframe" : L"";
-			wchar_t *ex_layered          = (GetWindowLongPtrW(window->hwnd, GWL_EXSTYLE) & WS_EX_LAYERED) ? L", ex_layered" : L"";
-			wchar_t *ex_noactivate       = (GetWindowLongPtrW(window->hwnd, GWL_EXSTYLE) & WS_EX_NOACTIVATE) ? L", ex_noactivate" : L"";
-			wchar_t *ex_palettewindow    = (GetWindowLongPtrW(window->hwnd, GWL_EXSTYLE) & WS_EX_PALETTEWINDOW) ? L", ex_palettewindow" : L"";
-			wchar_t *ex_overlappedwindow = (GetWindowLongPtrW(window->hwnd, GWL_EXSTYLE) & WS_EX_OVERLAPPEDWINDOW) ? L", ex_overlappedwindow" : L"";
-			print(L"(%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s) ",
+			wchar_t *visible             = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_VISIBLE) ? L"visible" : L"";
+			wchar_t *child               = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD) ? L", child" : L"";
+			wchar_t *disabled            = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_DISABLED) ? L", disabled" : L"";
+			wchar_t *popup               = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_POPUP) ? L", popup" : L"";
+			wchar_t *popupwindow         = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_POPUPWINDOW) ? L", popupwindow" : L"";
+			wchar_t *tiled               = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_TILED) ? L", tiled" : L"";
+			wchar_t *tiledwindow         = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_TILEDWINDOW) ? L", tiledwindow" : L"";
+			wchar_t *overlapped          = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_OVERLAPPED) ? L", overlapped" : L"";
+			wchar_t *overlappedwindow    = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_OVERLAPPEDWINDOW) ? L", overlappedwindow" : L"";
+			wchar_t *dlgframe            = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_DLGFRAME) ? L", dlgframe" : L"";
+			wchar_t *ex_toolwindow       = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) ? L", ex_toolwindow" : L"";
+			wchar_t *ex_appwindow        = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_APPWINDOW) ? L", ex_appwindow" : L"";
+			wchar_t *ex_dlgmodalframe    = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_DLGMODALFRAME) ? L", ex_dlgmodalframe" : L"";
+			wchar_t *ex_layered          = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED) ? L", ex_layered" : L"";
+			wchar_t *ex_noactivate       = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_NOACTIVATE) ? L", ex_noactivate" : L"";
+			wchar_t *ex_palettewindow    = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_PALETTEWINDOW) ? L", ex_palettewindow" : L"";
+			wchar_t *ex_overlappedwindow = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_OVERLAPPEDWINDOW) ? L", ex_overlappedwindow" : L"";
+
+			wchar_t class_name[MAX_PATH] = {0};
+			GetClassNameW(hwnd, class_name, countof(class_name));
+
+			print(L"\t");
+			print(L"%s (%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s) ",
+				class_name,
 				visible, child, disabled, popup, popupwindow, tiled, tiledwindow, overlapped, overlappedwindow, dlgframe,
 				ex_toolwindow, ex_appwindow, ex_dlgmodalframe, ex_layered, ex_noactivate, ex_palettewindow, ex_overlappedwindow);
+		}		
+	} else {
+		print(L"NULL hwnd\n");
+	}
+}
+
+static void print_window(linked_window_t *window, bool details) {
+	if (window && window->hwnd) {
+		if (!details) {
+			wchar_t *ws_iconic = (GetWindowLongPtrW(window->hwnd, GWL_STYLE) & WS_ICONIC) ? L" (minimized)" : L"";
+			print(L"%s%s \"%s\"\n", window->exe_name.text, ws_iconic,  window->title.text, window->exe_path.text);
+		} else {
+			print_hwnd(window->hwnd, details, window->exe_name.text, window->title.text, window->exe_path.text);
 		}
-		wchar_t *ws_iconic = (GetWindowLongPtrW(window->hwnd, GWL_STYLE) & WS_ICONIC) ? L"(minimized)" : L"";
-		wchar_t class_name[MAX_PATH] = {0};
-		GetClassNameW(window->hwnd, class_name, countof(class_name));
-		print(L"%s %s %s \"%s\" - %s\n", ws_iconic, class_name, window->exe_name.text, window->title.text, window->exe_path.text);
 	} else {
 		print(L"NULL window\n");
 	}
@@ -702,15 +710,6 @@ static void print_all(windows_t *windows, bool fancy, bool details) {
 	print(L"________________________________\n");
 }
 
-
-static linked_window_t *find_hwnd(windows_t *windows, void *hwnd) {
-	for (int i = 0; i < windows->num_windows; i++) {
-		if (windows->array[i].hwnd == hwnd) {
-			return &windows->array[i];
-		}
-	}
-	return NULL;
-}
 
 static linked_window_t *find_first(linked_window_t *window, bool top_level) {
 	if (top_level) {
@@ -774,7 +773,7 @@ static linked_window_t *find_next(linked_window_t *window, bool top_level, bool 
 	}
 
 	if (!alone) { // '!next_window && allow_wrap' implied
-		/* dbg */ print(L"wrap%s\n", reverse_direction ? L" to last" : L" to first");
+		///* dbg */ print(L"wrap%s\n", reverse_direction ? L" to last" : L" to first");
 		return reverse_direction ? find_last(window, top_level) : find_first(window, top_level);
 	}
 	// IMPORTANT! Here we choose that if there is no "next" window, the "next"
@@ -785,239 +784,246 @@ static linked_window_t *find_next(linked_window_t *window, bool top_level, bool 
 }
 
 
-static void select_null(selection_t *selection) {
-	selection->window = NULL;
-	selection->restore = NULL;
-}
-
 static void select_foreground(selection_t *selection) {
-	linked_window_t *foreground = find_hwnd(&windows, GetForegroundWindow());
-	
-	// TODO Hmm, make this more robust?
-	if (foreground == NULL) {
-		foreground = &windows.array[0];
-	}
-	
-	// Select foreground window or NULL
-	selection->window = foreground;
+	selection->current = windows.num_windows > 0 ? &windows.array[0] : NULL;
+	selection->showed = false;
 	selection->restore = GetForegroundWindow();
 
-	if (foreground == NULL) {
-		// dbg There are no windows (akshually, none of the filtered windows is the foreground window)
-		/* dbg */ print(L"whoops, we can't find the foreground window\n");
-	} else {
-		/* dbg */ print(L"foreground window: ");
-		/* dbg */ print_window(selection->window, false);
+	if (selection->current == NULL) {
+		// There are no windows (akshually, none of the filtered windows is the foreground window)
+	}
+
+	///* dbg */ print(L"foreground window: ");
+	///* dbg */ print_window(selection->current, false);
+	
+	if (selection->current && selection->current->hwnd != selection->restore)  {
+		///* dbg */ print(L"restore window: ");
+		///* dbg */ print_hwnd(selection->restore, false);
 	}
 }
 
-// Commit message for aeee53b ("Second cleanup") missed "refactor: remove should_switch & open_gui args from select_next()
 static void select_next(selection_t *selection, bool top_level, bool reverse_direction, bool allow_wrap) {
-	linked_window_t *next = find_next(selection->window, top_level, reverse_direction, allow_wrap);
-	// Select next window or NULL
-	selection->window = next;
+	selection->current = find_next(selection->current, top_level, reverse_direction, allow_wrap);
+	selection->showed = false;
 
 	///* dbg */ // sizeof: Damn that looks scary xD It's not tho--it's just getting and adding together the size of the 'text' fields of 'path_t' and 'title_t'
 	///* dbg */ wchar_t app_title[sizeof ((path_t *)0)->text + sizeof ((title_t *)0)->text + 1 + 8]; // +8
 	///* dbg */ errno_t cpy_error;
-	///* dbg */ cpy_error = wcscpy_s(app_title, sizeof ((path_t *)0)->text, selection->window->exe_name.text);
+	///* dbg */ cpy_error = wcscpy_s(app_title, sizeof ((path_t *)0)->text, selection->current->exe_name.text);
 	///* dbg */ cpy_error = wcscat_s(app_title, 32, L" - "); // Danger! Count your characters and size! We've allocated +8 for this, which is 4 wchars (3 for string, 1 for NUL)
-	///* dbg */ cpy_error = wcscat_s(app_title, sizeof ((title_t *)0)->text, selection->window->title.text);
+	///* dbg */ cpy_error = wcscat_s(app_title, sizeof ((title_t *)0)->text, selection->current->title.text);
 	///* dbg */ SetWindowTextW(hMainWindow, app_title);
 
-	if (next == NULL) {
-		/* dbg */ print(L"whoops, we can't find the next window\n");
+	if (selection->current) {
+		///* dbg */ print(L"selected %s%s: ", top_level ? L"app" : L"subwindow", allow_wrap ? L"" : L" (repeat)");
+		///* dbg */ print_window(selection->current, false);
+	}
+}
+
+static void select_show(selection_t *selection) {
+	show_hwnd(selection->current->hwnd, true);
+	selection->showed = true;
+}
+
+
+static void cancel(selection_t *selection, void *hwnd, bool restore)  {
+	// Old Note:
+	// 
+	// Cancelling selection upon window deactivation is desired functionality
+	// but is problematic because our code may call hide_gui() followed by
+	// select_done(), which causes a NULL dereference because hide_gui()
+	// leads to the select_null() call below, which NULLs the selection fields
+	// before the call to select_done().
+	// The problem is really that we are otherwise trying to keep selection state
+	// and gui state completely separate, but if we want to cancel selection upon
+	// window deactivation, selection state and gui state are dependent in
+	// this circumstance.
+
+	// New Note:
+	// 
+	// NOTE We strive to keep selection state and gui state independent, but in the case of cancellation
+	//      there is a dependence between the two, encapsulated in this function, illustrated by this
+	//      function having both a selection_t parameter and a hwnd parameter.
+	//      The dependence is basically that when selection is cancelled, we want the gui to disappear,
+	//      and that when the window is externally deactivated we want the selection to reset.
+	//      (See WndProc case WM_ACTIVATE for the other side of this dependence.)
+
+
+	// NOTE Previously hide_gui():
+
+	KillTimer(hwnd, 1);
+	ShowWindow(hwnd, SW_HIDE); // Yes, call ShowWindow() to hide window...
+
+	// NOTE Previously in select_show():
+
+	if (restore) {
+		show_hwnd(selection->restore, true);
+	}
+
+	// NOTE Previously select_null():
+
+	selection->current = NULL;
+	selection->showed = false;
+	selection->restore = NULL;
+
+
+	// DBG
+	if (restore) {
+		///* dbg */ print(L"done (esc)\n");
 	} else {
-		/* dbg */ print(L"selected %s%s: ", top_level ? L"app" : L"subwindow", allow_wrap ? L"" : L" (repeat)");
-		/* dbg */ print_window(selection->window, false);
+		///* dbg */ print(L"done\n");
 	}
 }
 
-static void select_done(selection_t *selection, bool should_switch, bool should_restore) {
-	if (should_switch) {
-		if (!should_restore) {
-			// TODO When fast_switching is implemented, it should do something here
-			show_hwnd(selection->window->hwnd, true);
-			/* dbg */ print(L"done\n");
-		} else {
-			show_hwnd(selection->restore, true);
-			/* dbg */ print(L"done (esc)\n");
-		}
-	}
-	hide_gui();
-	select_null(selection);
-}
 
-
-static void redraw(gdi_t *gdi, void *hwnd, selection_t *selection) {
-	// TODO Resolve circular dep more elegantly
-	static linked_window_t *find_first(linked_window_t *window, bool top_level);
+static void draw_gui(void *hwnd, gdi_t *gdi, style_t *style, selection_t *selection) {
 
 	// NOTE Previously gdi_init():
 
-	RECT rect;
+	RECT rect = {0};
 	GetClientRect(hwnd, &rect);
 
 	if (!EqualRect(&gdi->rect, &rect)) {
-		print(L"new hbm\n");
+		///* dbg */ print(L"new hbm\n");
 
 		gdi->rect = rect;
 		gdi->width = rect.right - rect.left;
 		gdi->height = rect.bottom - rect.top;
 
-		DeleteObject(gdi->hbm);
+		//DeleteObject(gdi->hbm);
 		DeleteDC(gdi->hdc);
 
 		HDC hdc = GetDC(hwnd);
 		gdi->hdc = CreateCompatibleDC(hdc);
 		gdi->hbm = CreateCompatibleBitmap(hdc, gdi->width, gdi->height);
-		SelectObject(gdi->hdc, gdi->hbm);
+		HBITMAP old_hbm = (HBITMAP)SelectObject(gdi->hdc, gdi->hbm);
+		//DeleteObject(old_hbm);
 	}
 
 	// NOTE Previously gdi_redraw():
 
-	#define HIGHLIGHT RGB(76, 194, 255)
-	#define BACKGROUND RGB(32, 32, 32) // dark mode?
-	#define ITEM_BG RGB(11, 11, 11)
-	#define TEXT_COLOR RGB(235, 235, 235)
+	// TODO Use 'style_t' 
 
-	#define OUTLINE 3
-	#define VERT_PAD 20
-	#define HORI_PAD 16
+	#define BACKGROUND   RGB(32, 32, 32) // dark mode?
+	#define TEXT_COLOR   RGB(235, 235, 235)
+	#define HIGHLIGHT    RGB(76, 194, 255) // Sampled from Windows 11 Alt+Tab
+	#define HIGHLIGHT_BG RGB(11, 11, 11) // Sampled from Windows 11 Alt+Tab
+
 	#define ICON_WIDTH 64
-	#define ROUNDED 10
-	// TODO Create a 'style_t' type
-	// TODO This is a mess atm. Working sorta fine, with some leaks I imagine, and looking rather terrible. FIX!
+	#define ICON_PAD    8
+	#define HORZ_PAD   24
+	#define VERT_PAD   32
+
+	#define SEL_OUTLINE   3
+	#define SEL_RADIUS   10
+	#define SEL_VERT_OFF 10 // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
+	#define SEL_HORZ_OFF  6 // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
+
+	static HBRUSH window_background = {0};
+	static HBRUSH selection_background = {0};
+	static HPEN selection_outline = {0};
+
+	// Init background brushes (static vars)
+	if (window_background == NULL) {
+		window_background = CreateSolidBrush(BACKGROUND);
+	}
+	if (selection_background == NULL) {
+		selection_background = CreateSolidBrush(HIGHLIGHT_BG);
+	}
+	if (selection_outline == NULL) {
+		selection_outline = CreatePen(PS_SOLID, SEL_OUTLINE, HIGHLIGHT);
+	}
+
+	// Invalidate & draw window background
+	RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE);
+	FillRect(gdi->hdc, &rect, window_background);
+
+	// Select pen & brush for RoundRect() (used to draw selection rectangle)
+	HPEN old_pen = (HPEN)SelectObject(gdi->hdc, selection_outline);
+	HBRUSH old_brush = (HBRUSH)SelectObject(gdi->hdc, selection_background);
+
+	// Select text font, color & background for DrawTextW() (used to draw app name)
+	HFONT old_font = (HFONT)SelectObject(gdi->hdc, GetStockObject(DEFAULT_GUI_FONT));
+	SetTextColor(gdi->hdc, TEXT_COLOR);
+	SetBkMode(gdi->hdc, TRANSPARENT);
+
+	// This is how GDI handles memory?
+	//DeleteObject(old_pen);
+	//DeleteObject(old_brush);
+	//DeleteObject(old_font);
 
 
-	RedrawWindow(hwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE);
-
-	RECT rc = {0};
-	//GetClientRect(WindowFromDC(gdi->hdc), &rc);
-	GetClientRect(hwnd, &rc);
-
-	const int ver = VERT_PAD; // Vertical padding (top)
-	const int hor = HORI_PAD; // Horizontal padding
-	const int width = ICON_WIDTH; // Icon width
 	int i = 0;
-
-	static HBRUSH icon_brush = {0};
-	static HBRUSH bg_brush = {0};
-	static HBRUSH selection_brush = {0};
-	if (bg_brush == NULL) {
-		//bg_brush = CreateSolidBrush(RGB(0, 0, 0));
-		//bg_brush = (HBRUSH)(COLOR_BTNFACE + 1);
-		//bg_brush = CreateSolidBrush(RGB(212, 208, 200));
-		bg_brush = CreateSolidBrush(BACKGROUND);
-		icon_brush = bg_brush;
-		selection_brush = CreateSolidBrush(ITEM_BG);
-	}
-
-	FillRect(gdi->hdc, &rc, bg_brush);
-
-	//rc.bottom = rc.bottom - (ver / 2);
-
-	linked_window_t *window;
-
-	i = 0;
-	window = &windows.array[0]; // windows->array[0] is always a top window because it is necessarily the first window of its app in the list
+	linked_window_t *window = &windows.array[0]; // windows->array[0] is always a top window because it is necessarily the first window of its app in the list
 	while (window) {
-
-		// Draw selection rectangle
 		linked_window_t *top1 = find_first(window, false);
-		linked_window_t *top2 = find_first(selection->window, false);
-		if (top1 == top2) { // Check if the windows are the same app
+		linked_window_t *top2 = find_first(selection->current, false);
+		bool app_is_selected = (top1 == top2);
 
-			//int center = (width * i) + (width / 2) + (hor * i);
+		// Special-case math for index 0
+		int  left0 = i == 0 ? ICON_PAD : 0;
+		int right0 = i != 0 ? ICON_PAD : 0;
 
-			//rc.left = hor + center - (width / 2);// -width; // - width means make the rect wider to the left
-			//rc.right = hor + center + (width / 2);// +width; // + width means make the rect wider to the right
+		int  icons = (ICON_PAD + ICON_WIDTH + ICON_PAD) * i;
+		int   left = HORZ_PAD + left0 + icons + right0;
+		int    top = VERT_PAD;
+		int  width = ICON_WIDTH;
+		int height = ICON_WIDTH;
+		int  right = left + width;
+		int bottom = top + height;
 
-			int x = (HORI_PAD + ICON_WIDTH) * i;
-
-			RECT rc2 = (RECT){
-				.left = x + 8,
-				.top = rc.top + 8 + 4,
-				.right = x + 64 + HORI_PAD + 8,
-				.bottom = rc.top + 64 + HORI_PAD + 8 + 4
-			};
-			//rc2.left += 32;
-			//rc2.right -= 32;
-			//FillRect(gdi->hdc, &rc2, CreateSolidBrush(RGB(200, 200, 200)));
-			//SelectObject(gdi->hdc, GetStockObject(GRAY_BRUSH));
-
-			HPEN new_pen = CreatePen(PS_SOLID, OUTLINE, HIGHLIGHT);
-			HPEN old_pen = (HPEN)SelectObject(gdi->hdc, new_pen);
-			HBRUSH new_brush = CreateSolidBrush(ITEM_BG);
-			HBRUSH old_brush = (HBRUSH)SelectObject(gdi->hdc, new_brush);
-			RoundRect(gdi->hdc, rc2.left, rc2.top, rc2.right, rc2.bottom, ROUNDED, ROUNDED);
-		}
-
-		if (window->next_top_window) {
-			window = window->next_top_window;
-			i++;
+		if (!app_is_selected) {
+			// Draw only icon, with window background
+			DrawIconEx(gdi->hdc, left, top, window->hico, width, height, 0, window_background, DI_NORMAL);
 		} else {
-			break;
-		}
-	}
-
-	rc.bottom = rc.bottom - 4; //(ver / 2);
-	i = 0;
-	window = &windows.array[0]; // windows->array[0] is always a top window because it is necessarily the first window of its app in the list
-	while (window) {
-
-		int center = (width * i) + (width / 2) + (hor * i);
-
-		rc.left = hor + center - (width / 2) - width; // - width means make the rect wider to the left
-		rc.right = hor + center + (width / 2) + width; // + width means make the rect wider to the right
-
-		linked_window_t *top1 = find_first(window, false);
-		linked_window_t *top2 = find_first(selection->window, false);
-
-		if (top1 == top2) {
-			icon_brush = selection_brush;
-		} else {
-			icon_brush = bg_brush;
-		}
-
-		// Draw icon
-		void *hico = window->hico;//icon(window->exe_path.text, window->hwnd);
-		DrawIconEx(gdi->hdc, hor + (width * i) + (hor * i), ver, hico, ICON_WIDTH, ICON_WIDTH, 0, icon_brush, DI_NORMAL);
-
-		// Draw app name
-		if (top1 == top2) { // Check if the windows are the same app
+			// Draw selection rectangle and icon, with selection background
+			RoundRect(gdi->hdc, left - SEL_VERT_OFF, top - SEL_HORZ_OFF, right + SEL_VERT_OFF, bottom + SEL_HORZ_OFF, SEL_RADIUS, SEL_RADIUS);
+			DrawIconEx(gdi->hdc, left, top, window->hico, width, height, 0, selection_background, DI_NORMAL);
+			
+			// Draw app name
 			wchar_t *title;
 			if (window->app_name.ok) {
 				title = window->app_name.text;
 			} else {
 				title = window->exe_name.text;
 			}
-			rc.bottom -= 3;
-			//LOGFONT logfont;
-			//GetObject(hFont, sizeof(LOGFONT), &logfont);
 
-			SelectObject(gdi->hdc, GetStockObject(DEFAULT_GUI_FONT)); // TODO / BUG Leaks, I believe? Have to capture and later release return value when selecting object?
-			//SelectObject(gdi->hdc, GetFont(L"Microsoft Sans Serif", 15));
-			SetTextColor(gdi->hdc, TEXT_COLOR);
-			//SetBkColor(gdi->hdc, RGB(200, 200, 200));
-			SetBkColor(gdi->hdc, ITEM_BG);
-			SetBkMode(gdi->hdc, TRANSPARENT);
+			// Measure text width
+			RECT test_rect = {0};
+			DrawTextW(gdi->hdc, title, -1, &test_rect, DT_CALCRECT | DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
+			int title_width = (test_rect.right - test_rect.left) + 2; // Hmm, measured size seems a teensy bit too small, so +2
 
-			// TODO Adjust centered text to align with left-most and right-most edges of window
-			//print(L"%d, %d, %d, %d\n", rc.left, rc.top, rc.right, rc.bottom);
-			if (rc.left < 0) {
-				//rc.right += abs(rc.left);
-				//rc.left = 0;
-				//print(L"%d, %d, %d, %d\n", rc.left, rc.top, rc.right, rc.bottom);
-			} else if (rc.right > rect.right) {
-				//rc.left -= rc.right - rect.right; // TODO Fix up messy code: rc is modified rect, rect is "client rect"
-				//rc.right = rect.right;
-				//print(L"%d, %d, %d, %d\n", rc.left, rc.top, rc.right, rc.bottom);
+			// DrawTextW() uses a destination rect for drawing
+			RECT text_rect = rect;
+
+			int width_diff = (right - left) - title_width;
+			if (width_diff < 0) {
+				// text_rect is too small for text, grow the rect
+				text_rect.left = left + ceilf(width_diff / 2);
+				text_rect.right = right - ceilf(width_diff / 2);
+			} else {
+				text_rect.left = left;
+				text_rect.right = right;
 			}
 
-			DrawTextW(gdi->hdc, title, -1, &rc, DT_CENTER | DT_SINGLELINE | DT_BOTTOM);
+			text_rect.bottom -= ICON_PAD; // *** this lifts the app text up a little ***
+
+			// If the app name, when centered, extends past window bounds, adjust label position to be inside window bounds
+			if (text_rect.left < 0) {
+				text_rect.right += ICON_PAD + abs(text_rect.left);
+				text_rect.left   = ICON_PAD + 0;
+			}
+			if (text_rect.right > rect.right) {
+				text_rect.left -= (text_rect.right - rect.right) + ICON_PAD;
+				text_rect.right = rect.right - ICON_PAD;
+			}
+
+			///* dbg */ Check the size of the text box
+			///* dbg */ FillRect(gdi->hdc, &text_rect, CreateSolidBrush(RGB(255, 0, 0)));
+			DrawTextW(gdi->hdc, title, -1, &text_rect, DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
 		}
 
+		// Go to draw next linked window
 		if (window->next_top_window) {
 			window = window->next_top_window;
 			i++;
@@ -1078,7 +1084,7 @@ static intptr_t LLKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam) {
 
 	// Info about the keyboard for the low level hook
 	KBDLLHOOKSTRUCT *kb = (KBDLLHOOKSTRUCT *)lParam;
-	unsigned long virtual_key = kb->vkCode;
+	vkcode virtual_key = kb->vkCode;
 	bool key_down = !(kb->flags & LLKHF_UP);
 	bool key_repeat = set_key(&keyboard, virtual_key, key_down); // Manually track key repeat using 'keyboard->keys' (see above)
 
@@ -1107,6 +1113,7 @@ static intptr_t LLKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam) {
 	bool ctrl_held   = get_key(&keyboard, VK_LCONTROL); // NOTE This is the *left* ctrl key // BUG! What if the users chooses their mod1 or mod2 to be ctrl?
 	bool keyQ_down   = virtual_key ==  0x51 && key_down;
 	bool keyW_down   = virtual_key ==  0x57 && key_down;
+	bool keyM_down  =  virtual_key ==  0x4D && key_down;
 	bool keyF4_down  = virtual_key == VK_F4 && key_down;
 
 	// NOTE By returning a non-zero value from the hook procedure, the message
@@ -1126,10 +1133,10 @@ static intptr_t LLKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam) {
 	// [x] Input sink so keys don't bleed to underlying apps
 	// [x] Flicker-free fast switch
 	// [ ] Q to quit application (i.e. close all windows, like macOS)
-	// [ ] W to close window (like Windows and macOS)
-	// [ ] M to minimize/restore window (what about (H)iding?)
-	// [ ] Delete to close window (like Windows 10 and up)
-	// [-] Alt-F4 (atm closes cmdtab.exe)
+	// [x] W to close window (like Windows and macOS)
+	// [x] M to minimize/restore window (what about (H)iding?)
+	// [x] Delete to close window (like Windows 10 and up)
+	// [x] Alt-F4 (atm closes cmdtab.exe)
 	// [ ] Mouse click app icon to switch
 	// [x] Cancel switcher on mouse click outside
 	// [ ] Close app with mouse click on a red "X" on icon
@@ -1147,7 +1154,7 @@ static intptr_t LLKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam) {
 	if (key1_down && mod1_held && ctrl_held) {
 		bool enabled = config.switch_apps = !config.switch_apps; // NOTE Atm, we only support a hotkey for toggling app switching, not toggling window switching (cuz why would we?)
 		if (!enabled) {
-			select_done(&selection, false, false);
+			cancel(&selection, hMainWindow, false);
 			return pass_message;
 		} else {
 			// pass-through to Alt+Tab below
@@ -1157,52 +1164,79 @@ static intptr_t LLKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam) {
 	// ========================================
 	// Activation
 	// ========================================
-	// Alt+Tab
-	if (key1_down && mod1_held && config.switch_apps) {
-		if (!selection.window) {
-			rebuild(&windows);
-			select_foreground(&selection);
-			size_gui(&config.style, windows.num_apps); // NOTE Must call size_gui() before redraw() & before show_gui()
-		}
-		if (selection.window) {
-			select_next(&selection, true, shift_held, !config.wrap_bump || !key_repeat); // TODO / BUG Could potentially leave selection->window == NULL
-			redraw(&gdi, hMainWindow, &selection);
-			int delay = once() ? 0 : config.gui_delay;
-			show_gui(delay);
-		}
-
-		//if (config.fast_switching) {
-			//peek(selection->window->hwnd); // TODO Doesn't work yet. See config.fast_switching and peek()
-		//}
-
-		//intptr_t result = CallNextHookEx(NULL, nCode, wParam, lParam); // We'll be good citizens
-		return consume_message; // Since we "own" this hotkey system-wide, we consume this message unconditionally
+	
+	// First Alt+Tab
+	if (!selection.current && key1_down && mod1_held && config.switch_apps) {
+		rebuild(&windows);
+		select_foreground(&selection); // Sets 'selection.current'
+		size_gui(hMainWindow, &config.style, windows.num_apps); // NOTE Must call size_gui() after rebuild(), before draw_gui() & before show_gui()
+		// NOTE No return, as the two activations fallthrough to navigation below
 	}
-	// Alt+`
-	if (key2_down && mod2_held && config.switch_windows) {
-		if (!selection.window) {
-			rebuild(&windows);
-			select_foreground(&selection);
-		}
-		if (selection.window) {
-			select_next(&selection, false, shift_held, !config.wrap_bump || !key_repeat); // TODO / BUG Could potentially leave selection->window == NULL
-			show_hwnd(selection.window->hwnd, true);
-		}
-
-		//intptr_t result = CallNextHookEx(NULL, nCode, wParam, lParam); // We'll be good citizens
-		return consume_message; // Since we "own" this hotkey system-wide, we consume this message unconditionally
+	
+	// First Alt+`
+	if (!selection.current && key2_down && mod2_held && config.switch_windows) {
+		rebuild(&windows);
+		select_foreground(&selection); // Sets 'selection.current'
+		select_next(&selection, false, shift_held, !config.wrap_bump || !key_repeat); // TODO / BUG Could potentially leave selection->current == NULL
+		//print(L"Alt+`ing \"from scratch\"\n");
+		// NOTE No return, as the two activations fallthrough to navigation below
 	}
+
 	// ========================================
 	// Navigation
 	// ========================================
-	// Alt+arrows. People ask for this, so...
-	if (selection.window && (next_down || prev_down) && mod1_held) { // selection.window: You can't *start* window switching with Alt+arrows, but you can navigate the switcher with arrows when switching is active
+	
+	// Alt+Tab for next app (hold Shift for previous)
+	if (selection.current && key1_down && mod1_held) {
+		select_next(&selection, true, shift_held, !config.wrap_bump || !key_repeat); // TODO / BUG Could potentially leave selection->current == NULL
+		if (config.fast_switching_apps) {
+			select_show(&selection);
+			//peek(selection->current->hwnd); // TODO Doesn't work yet. See config.fast_switching and peek()
+		}
+		if (config.gui_show_apps) {
+			draw_gui(hMainWindow, &gdi, &config.style, &selection);
+			show_gui(hMainWindow, config.gui_delay);
+		}
+		//intptr_t result = CallNextHookEx(NULL, nCode, wParam, lParam); // We'll be good citizens
+		return consume_message; // Since we "own" this hotkey system-wide, we consume this message unconditionally
+	}
+
+	// Alt+` for next window (hold Shift for previous)
+	if (selection.current && key2_down && mod2_held) {
+		if (selection.showed) {
+			select_next(&selection, false, shift_held, !config.wrap_bump || !key_repeat); // TODO / BUG Could potentially leave selection->current == NULL
+			//print(L"Alt+`ing after having alt+`ed\n");
+		} else {
+			//print(L"Alt+`ing after having alt+tab'ed\n");
+		}
+
+		if (config.fast_switching_windows) {
+			select_show(&selection);
+		}
+		if (config.gui_show_windows) {
+			// BUG! Need to size_gui()! since size_gui() is not called in Alt+` activation above
+			draw_gui(hMainWindow, &gdi, &config.style, &selection);
+			show_gui(hMainWindow, config.gui_delay);
+		}
+		//intptr_t result = CallNextHookEx(NULL, nCode, wParam, lParam); // We'll be good citizens
+		return consume_message; // Since we "own" this hotkey system-wide, we consume this message unconditionally
+	}
+
+	// Alt+Arrows. People ask for this, so...
+	if (selection.current && (next_down || prev_down) && mod1_held) { // selection.current: You can't *start* window switching with Alt+arrows, but you can navigate the switcher with arrows when switching is active
 		select_next(&selection, true, prev_down, !config.wrap_bump || !key_repeat);
-		redraw(&gdi, hMainWindow, &selection);
+		if (config.fast_switching_apps) {
+			select_show(&selection);
+			//peek(selection->current->hwnd); // TODO Doesn't work yet. See config.fast_switching and peek()
+		}
+		if (config.gui_show_apps) {
+			draw_gui(hMainWindow, &gdi, &config.style, &selection);
+		}
 
 		//intptr_t result = CallNextHookEx(NULL, nCode, wParam, lParam); // We'll be good citizens
 		return consume_message; // Since our swicher is active, we "own" this hotkey, so we consume this message
 	}
+
 	// ========================================
 	// Deactivation
 	// ========================================
@@ -1218,27 +1252,33 @@ static intptr_t LLKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam) {
 	//      In short:
 	//      1) Our app never hooks Alt keydowns
 	//      2) Our app hooks Alt keyups, but always passes it through on pain of getting a stuck Alt key because of point 1
-	if (selection.window && mod1_up) {
-		select_done(&selection, true, false);
+	if (selection.current && mod1_up) {
+		select_show(&selection);
+		cancel(&selection, hMainWindow, false);
 		return pass_message; // See note above on "Alt keyup" on why we don't consume this message
 	}
-	if (selection.window && mod2_up) {
-		select_done(&selection, true, false);
+	if (selection.current && mod2_up) {
+		select_show(&selection);
+		cancel(&selection, hMainWindow, false);
 		return pass_message; // See note above on "Alt keyup" on why we don't consume this message
 	}
 	// Alt+Enter
-	if (selection.window && (mod1_held || mod2_held) && enter_down) {
-		select_done(&selection, true, false);
+	if (selection.current && (mod1_held || mod2_held) && enter_down) {
+		select_show(&selection);
+		cancel(&selection, hMainWindow, false);
 		return pass_message; // See note above on "Alt keyup" on why we don't consume this message
 	}
 	// Alt+Esc
-	if (selection.window && (mod1_held || mod2_held) && esc_down) { // BUG There's a bug here if mod1 and mod2 aren't both the same key. In that case we'll still pass through the key event, even though we should own it since it's not Alt+Esc
-		select_done(&selection, true, true);
+	if (selection.current && (mod1_held || mod2_held) && esc_down) { // BUG There's a bug here if mod1 and mod2 aren't both the same key. In that case we'll still pass through the key event, even though we should own it since it's not Alt+Esc
+		cancel(&selection, hMainWindow, true);
 		//intptr_t result = CallNextHookEx(NULL, nCode, wParam, lParam); // We'll be good citizens
 		return consume_message; // We don't "own"/monopolize Alt+Esc. It's used by Windows for another, rather useful, window switching mechaninsm, and we preserve that
 	}
+	// ========================================
+	// Extended window management
+	// ========================================
 	// Alt+F4 & Alt+Q
-	if (selection.window && ((mod1_held || mod2_held) && (keyF4_down || keyQ_down))) {
+	if (selection.current && ((mod1_held || mod2_held) && (keyF4_down || keyQ_down))) {
 		if (keyF4_down) {
 			print(L"F4\n");
 			SendMessageW(hMainWindow, WM_CLOSE, 0, 0);
@@ -1248,17 +1288,29 @@ static intptr_t LLKeyboardProc(int nCode, intptr_t wParam, intptr_t lParam) {
 		}
 	}
 	// Alt+W
-	if (selection.window && ((mod1_held || mod2_held) && keyW_down)) {
+	if (selection.current && ((mod1_held || mod2_held) && keyW_down)) {
 		print(L"W\n");
+		SendMessageW(selection.current->hwnd, WM_CLOSE, 0, 0);
+		rebuild(&windows);
+		size_gui(hMainWindow, &config.style, windows.num_apps); // NOTE Must call size_gui() after rebuild(), before draw_gui() & before show_gui()
+		draw_gui(hMainWindow, &gdi, &config.style, &selection);
 	}
 	// Alt+Delete
-	if (selection.window && ((mod1_held || mod2_held) && delete_down)) {
+	if (selection.current && ((mod1_held || mod2_held) && delete_down)) {
 		print(L"Delete\n");
+		SendMessageW(selection.current->hwnd, WM_CLOSE, 0, 0);
+		rebuild(&windows);
+		size_gui(hMainWindow, &config.style, windows.num_apps); // NOTE Must call size_gui() after rebuild(), before draw_gui() & before show_gui()
+		draw_gui(hMainWindow, &gdi, &config.style, &selection);
 	}
-	// Sink. Consume all other keystrokes when we're activated. Maybe make this
-	// a config option in case shit gets weird with the switcher eating
-	// everything when activated
-	if (selection.window && (mod1_held || mod2_held)) {
+	// Alt+M
+	if (selection.current && ((mod1_held || mod2_held) && keyM_down)) {
+		print(L"M\n");
+		SendMessageW(selection.current->hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+	}
+
+	// Consume keystrokes when activated
+	if (selection.current && (mod1_held || mod2_held)) {
 		/* dbg */ //print(L"sink vkcode:%llu%s%s\n", virtual_key, key_down ? L" down" : L" up", key_repeat ? L" (repeat)" : L"");
 		return consume_message;
 	}
@@ -1273,13 +1325,10 @@ static intptr_t WndProc(void *hwnd, unsigned message, intptr_t wParam, intptr_t 
 		}
 		case WM_ACTIVATE: {
 			if (wParam == WA_INACTIVE) {
-				//print(L"Wnd Deactivated\n");
-				select_done(&selection, false, false);
-				return DefWindowProcW(hwnd, message, wParam, lParam);
-			} else {
-				//print(L"Wnd Activated\n");
-				return DefWindowProcW(hwnd, message, wParam, lParam);
-			}
+				//print(L"gui lost focus\n");
+				cancel(&selection, hMainWindow, false); // NOTE See comments in cancel()
+			} 
+			return DefWindowProcW(hwnd, message, wParam, lParam);
 		}
 		case WM_PAINT: {
 			// Double buffered drawing:
@@ -1297,7 +1346,7 @@ static intptr_t WndProc(void *hwnd, unsigned message, intptr_t wParam, intptr_t 
 			return 0;
 		}
 		case WM_CLOSE: {
-			select_done(&selection, false, false);
+			cancel(&selection, hMainWindow, false);
 			int result = MessageBoxW(NULL, L"Do you want to quit cmdtab?", L"cmdtab", MB_YESNO | MB_ICONQUESTION | MB_TASKMODAL);
 			switch (result) {
 				case IDYES: return DefWindowProcW(hwnd, message, wParam, lParam);
@@ -1320,15 +1369,8 @@ static intptr_t WndProc(void *hwnd, unsigned message, intptr_t wParam, intptr_t 
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
 
-	// Quit if another instance of cmdtab is already running
-	hMutexHandle = CreateMutexW(NULL, TRUE, L"cmdtab_mutex");
-	if (GetLastError() == ERROR_ALREADY_EXISTS) {
-		int result = MessageBoxW(NULL, L"cmdtab.exe is already running.", L"cmdtab", MB_OK | MB_ICONINFORMATION | MB_TASKMODAL);
-		return result; // 0
-	}
-
 	// Prompt about autorun (unless we got autorun param)
-	if (wcscmp(pCmdLine, L"--autorun") == 0) { // lstrcmpW, CompareStringW
+	if (wcscmp(pCmdLine, L"--autorun")) { // lstrcmpW, CompareStringW
 		int result = MessageBoxW(NULL, L"Start cmdtab.exe automatically? (Relaunch cmdtab.exe to change your mind.)", L"cmdtab", MB_YESNO | MB_ICONQUESTION | MB_TASKMODAL);
 		switch (result) {
 			case IDYES: autorun(true, L"CmdTab");
@@ -1336,14 +1378,18 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 		}
 	}
 
+	// Quit if another instance of cmdtab is already running
+	HANDLE hMutex = CreateMutexW(NULL, TRUE, L"cmdtab_mutex");
+	if (GetLastError() == ERROR_ALREADY_EXISTS) {
+		int result = MessageBoxW(NULL, L"cmdtab.exe is already running.", L"cmdtab", MB_OK | MB_ICONINFORMATION | MB_TASKMODAL);
+		return result; // 0
+	}
+
 	// Set default settings
 	defaults(&config);
 
-	// Keep instance handle
-	hMainInstance = hInstance;
-
 	// Install keyboard hook
-	hKeyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, (HOOKPROC)LLKeyboardProc, NULL, 0);
+	void *hKeyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, (HOOKPROC)LLKeyboardProc, NULL, 0);
 
 	// Create window
 	WNDCLASSEX wcex = {0};
@@ -1355,23 +1401,31 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	hMainWindow = CreateWindowExW(WS_EX_TOOLWINDOW, RegisterClassExW(&wcex), NULL, 0, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL, hInstance, NULL);
 
+	// Clear all window styles for very plain window
+	SetWindowLongW(hMainWindow, GWL_STYLE, 0);
+
 	// Use dark mode to make the title bar dark
 	// The alternative is to disable the title bar but this removes nice rounded
 	// window shaping.
 	// For dark mode details, see: https://stackoverflow.com/a/70693198/659310
-	BOOL USE_DARK_MODE = TRUE;
-	DwmSetWindowAttribute(hMainWindow, DWMWA_USE_IMMERSIVE_DARK_MODE, &USE_DARK_MODE, sizeof USE_DARK_MODE);
+	//BOOL USE_DARK_MODE = TRUE;
+	//DwmSetWindowAttribute(hMainWindow, DWMWA_USE_IMMERSIVE_DARK_MODE, &USE_DARK_MODE, sizeof USE_DARK_MODE);
+
+	// Rounded window corners
+	DWM_WINDOW_CORNER_PREFERENCE preference = DWMWCP_ROUND;
+	DwmSetWindowAttribute(hMainWindow, DWMWA_WINDOW_CORNER_PREFERENCE, &preference, sizeof preference);
 
 	// Start msg loop for thread
 	MSG msg;
-	while (GetMessageW(&msg, NULL, 0, 0)) {
+	while (GetMessageW(&msg, NULL, 0, 0) > 0) {
 		DispatchMessageW(&msg);
 	}
 
 	// Done
 	UnhookWindowsHookEx(hKeyboardHook);
-	ReleaseMutex(hMutexHandle);
-	CloseHandle(hMutexHandle);
+	CloseHandle(hKeyboardHook);
+	ReleaseMutex(hMutex);
+	CloseHandle(hMutex);
 
 	return (int)msg.wParam;
 }
