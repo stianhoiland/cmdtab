@@ -49,7 +49,7 @@ struct windows {
 
 struct selection {
 	linked_window_t *window; // Rename 'current'?
-	linked_window_t *restore; // Rename 'initial'?
+	void *restore; // Rename 'initial'?
 };
 
 struct keyboard {
@@ -800,7 +800,7 @@ static void select_foreground(selection_t *selection) {
 	
 	// Select foreground window or NULL
 	selection->window = foreground;
-	selection->restore = foreground;
+	selection->restore = GetForegroundWindow();
 
 	if (foreground == NULL) {
 		// dbg There are no windows (akshually, none of the filtered windows is the foreground window)
@@ -840,7 +840,7 @@ static void select_done(selection_t *selection, bool should_switch, bool should_
 			show_hwnd(selection->window->hwnd, true);
 			/* dbg */ print(L"done\n");
 		} else {
-			show_hwnd(selection->restore->hwnd, true);
+			show_hwnd(selection->restore, true);
 			/* dbg */ print(L"done (esc)\n");
 		}
 	}
