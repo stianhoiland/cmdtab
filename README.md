@@ -1,7 +1,7 @@
 # cmdtab[^1]
 The best macOS-style Alt-Tab window/app switcher replacement for Windows, written in straight<sup>delicious</sup> C.
 
-![screenshot2-cropped](https://github.com/stianhoiland/cmdtab/assets/2081712/196da2c5-0536-4dbb-97ca-27aad0a73c8a)
+![screenshot2](https://github.com/stianhoiland/cmdtab/assets/2081712/c6095619-ec3b-4098-bc70-fceea1035ce4)
 
 ## What's the deal?
 
