@@ -17,7 +17,7 @@ So, you like the way Apple does it, but you're using Windows? **cmdtab** for Win
 - A hotkey to cycle apps (Chrome → Spotify → File Explorer)
 - A different hotkey to cycle windows (Chrome1 → Chrome2 → Chrome3)
 - Big readable app icons
-- Super lightweight program (less than 26kb)
+- Super lightweight program (35kb)
 - Simple, clean, clear, commented C source code (easy to change/fix/extend by you/me/everyone!)
 - Lots of tiny, useful QoL features, like reverse, arrow keys & enter, cancel, restore, mouse support, wrap bump, quit app, close window, delayed show...
 - So fast!
@@ -37,7 +37,7 @@ The basics of window switching are easy to understand, but why is **cmdtab** *th
 - Cancel and close the switcher by pressing Escape
 - Smart key capture so key presses don't unexpectedly bleed through to other apps
 - Wrap bump is hard to explain but easy to feel: Try holding Alt-Tab until the end, then press Tab again—works in reverse, too!
-- ~~Press Q to close the selected application (by closing all its windows)~~ (WIP!)
+- Press Q to quit the selected app
 - Press W to close the selected window
 - Option to return to the initial window when cancelling switcher by pressing Escape. This doesn't override or block Windows' native Alt-Escape hotkey
 - Press F4 while the switcher is open to quit **cmdtab**
