@@ -7,48 +7,48 @@
 #define COBJMACROS
 #define _CRTDBG_MAP_ALLOC
 
-#define NOGDICAPMASKS    
+#define NOGDICAPMASKS
 //#define NOVIRTUALKEYCODES
-//#define NOWINMESSAGES    
-//#define NOWINSTYLES      
-//#define NOSYSMETRICS     
-#define NOMENUS          
-#define NOICONS          
-#define NOKEYSTATES      
-//#define NOSYSCOMMANDS    
-//#define NORASTEROPS      
-//#define NOSHOWWINDOW     
-#define OEMRESOURCE      
-#define NOATOM           
-#define NOCLIPBOARD      
-#define NOCOLOR          
-//#define NOCTLMGR         
-//#define NODRAWTEXT       
-//#define NOGDI            
-#define NOKERNEL         
-//#define NOUSER           
-#define NONLS            
-//#define NOMB             
-#define NOMEMMGR         
-#define NOMETAFILE       
-#define NOMINMAX         
-//#define NOMSG            
-#define NOOPENFILE       
-#define NOSCROLL         
-#define NOSERVICE        
-#define NOSOUND          
-#define NOTEXTMETRIC     
-//#define NOWH             
-//#define NOWINOFFSETS     
-#define NOCOMM           
-#define NOKANJI          
-#define NOHELP           
-#define NOPROFILER       
-#define NODEFERWINDOWPOS 
-#define NOMCX            
+//#define NOWINMESSAGES
+//#define NOWINSTYLES
+//#define NOSYSMETRICS
+#define NOMENUS
+#define NOICONS
+#define NOKEYSTATES
+//#define NOSYSCOMMANDS
+//#define NORASTEROPS
+//#define NOSHOWWINDOW
+#define OEMRESOURCE
+#define NOATOM
+#define NOCLIPBOARD
+#define NOCOLOR
+//#define NOCTLMGR
+//#define NODRAWTEXT
+//#define NOGDI
+#define NOKERNEL
+//#define NOUSER
+#define NONLS
+//#define NOMB
+#define NOMEMMGR
+#define NOMETAFILE
+#define NOMINMAX
+//#define NOMSG
+#define NOOPENFILE
+#define NOSCROLL
+#define NOSERVICE
+#define NOSOUND
+#define NOTEXTMETRIC
+//#define NOWH
+//#define NOWINOFFSETS
+#define NOCOMM
+#define NOKANJI
+#define NOHELP
+#define NOPROFILER
+#define NODEFERWINDOWPOS
+#define NOMCX
 
 #include <windows.h>
-//#include <crtdbg.h>
+#include <crtdbg.h>
 //#include "winuser.h"                // Used by GetWindowTitle, GetFilepath, filter, link, next, user32.lib
 #include "shellapi.h"               // Used by GetAppIcon, shell32.lib
 #include "shlwapi.h"                // Used by GetAppName, shell32.lib?
@@ -61,8 +61,8 @@
 #include "commoncontrols.h"         // Used by GetAppIcon, needs COBJMACROS, comctl.lib
 
 #pragma comment(lib, "user32.lib")
-#pragma comment(lib, "shlwapi.lib") 
-#pragma comment(lib, "dwmapi.lib") 
+#pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "pathcch.lib")
 #pragma comment(lib, "version.lib") // Used by GetAppName
 
@@ -76,8 +76,10 @@
 // Utility belt
 //==============================================================================
 
+//#define min(a,b) (((a)<(b))?(a):(b))
+//#define max(a,b) (((a)>(b))?(a):(b))
 #define countof(a) (ptrdiff_t)(sizeof(a)/sizeof(*a))
-#define string(str) {str,countof(str)-1,true} 
+#define string(str) {str,countof(str)-1,true}
 
 #define false 0
 #define true 1
@@ -122,7 +124,7 @@ static bool StringsAreEqual(string *s1, string *s2)
 	}
 	return true;
 }
-static bool StringEndsWith(string *s1, string *s2) 
+static bool StringEndsWith(string *s1, string *s2)
 {
 	u16 *str = s1->text;
 	u16 *fix = s2->text;
@@ -131,9 +133,15 @@ static bool StringEndsWith(string *s1, string *s2)
 	return str_len >= fix_len && !memcmp(str+str_len-fix_len, fix, fix_len);
 }
 
-static void Debug(void)
+static void Debug(u16 *fmt, ...)
 {
 	#ifdef _DEBUG
+	u16 buffer[2048];
+	va_list args;
+	va_start(args, fmt);
+	StringCchVPrintfW(buffer, countof(buffer)-1, fmt, args);
+	va_end(args);
+	OutputDebugStringW(buffer);
 	__debugbreak(); // Or DebugBreak in debugapi.h
 	#endif
 }
@@ -192,11 +200,11 @@ static string GetWindowClass(handle hwnd)
 static bool _GetCoreWindow(handle child, i64 lparam)
 {
 	// EnumChildProc used by GetCoreWindow
-	// Set inout lparam to child window of UWP host if child window has core window (i.e. hosted) class
+	// Set inout 'lparam' to hosted core window
 	string class = GetWindowClass(child);
 	if (StringsAreEqual(&class, &UWPCoreWindowClass)) {
 		*(handle *)lparam = child;
-		return false; // Found the hosted window, so we're done
+		return false; // Found the hosted core window, so we're done
 	} else {
 		return true; // Return true to continue EnumChildWindows
 	}
@@ -222,6 +230,36 @@ static handle GetAppHost(handle hwnd)
 	}
 }
 
+static bool IsAltTabWindow(handle hwnd)
+{
+	// Raymond Chen: https://devblogs.microsoft.com/oldnewthing/20200302-00/?p=103507
+	if (!IsWindowVisible(hwnd)) {
+		return false;
+	}
+	int cloaked = 0;
+	DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof cloaked); // Windows 8
+	if (cloaked) {
+		return false;
+	}
+	// "A window with the WS_EX_APPWINDOW extended style is treated as if it has no owner,
+	// even if it does."
+	if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_APPWINDOW) {
+		return true;
+	}
+	// "The window should not be activated through programmatic access or via keyboard
+	// navigation by accessible technology, such as Narrator."
+	// "The window does not appear on the taskbar by default."
+	if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_NOACTIVATE) {
+		return false;
+	}
+	// "A tool window [i.e. WS_EX_TOOLWINDOW] does not appear in the taskbar or
+	// in the dialog that appears when the user presses ALT-TAB." (docs)
+	if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) {
+		return false;
+	}
+	return true;
+}
+
 static string GetFilepath(handle hwnd)
 {
 	// How to get the filepath of the executable for the process that spawned the window:
@@ -230,7 +268,6 @@ static string GetFilepath(handle hwnd)
 	// 3. QueryFullProcessImageNameW [Windows Vista] to get full "executable image" name (i.e. exe path) for process
 
 	string path = {0};
-
 	u32 pid;
 	GetWindowThreadProcessId(hwnd, &pid);
 	handle process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid); // NOTE See GetProcessHandleFromHwnd
@@ -238,18 +275,19 @@ static string GetFilepath(handle hwnd)
 		Print(L"WARNING couldn't open process with pid: %u\n", pid);
 		return path;
 	}
-	path.length = countof(path.text);
-	path.ok = QueryFullProcessImageNameW(process, 0, path.text, &path.length); // NOTE Can use GetLongPathName if getting shortened paths
+	u32 length = countof(path.text);
+	path.ok = QueryFullProcessImageNameW(process, 0, path.text, &length); // NOTE Can use GetLongPathName if getting shortened paths
 	CloseHandle(process);
 	if (!path.ok) {
 		Print(L"WARNING couldn't get exe path for process with pid: %u\n", pid);
 		return path;
 	}
+	path.length = length;
 	return path;
 }
 static string GetFilename(u16 *filepath, bool extension)
 {
-	// Just yer normal filepath string manipulation. Aka. trimpath?
+	// Just yer normal filepath string manipulation. Aka. basename?
 	string name = {0};
 	name.ok = SUCCEEDED(StringCchCopyNW(name.text, countof(name.text), PathFindFileNameW(filepath), countof(name.text)));
 	if (!extension) {
@@ -332,7 +370,7 @@ static string GetAppName(u16 *filepath)
 	abort:
 		return name;
 }
-static handle GetAppIcon(u16 *filepath) 
+static handle GetAppIcon(u16 *filepath)
 {
 	// From Raymond Chen: https://stackoverflow.com/a/12429114/659310
 	//
@@ -358,7 +396,7 @@ static handle GetAppIcon(u16 *filepath)
 	}
 	SHFILEINFOW info = {0};
 	if (!SHGetFileInfoW(filepath, 0, &info, sizeof info, SHGFI_SYSICONINDEX)) { // 2nd arg: -1, 0 or FILE_ATTRIBUTE_NORMAL
-		Debug(); // SHGetFileInfoW has special return with SHGFI_SYSICONINDEX flag, which I think should never fail (docs unclear?)
+		Debug(L"suspicious SHGetFileInfoW return"); // SHGetFileInfoW has special return with SHGFI_SYSICONINDEX flag, which I think should never fail (docs unclear?)
 		return null;
 	}
 	IImageList *list = {0};
@@ -368,7 +406,7 @@ static handle GetAppIcon(u16 *filepath)
 	HICON icon = {0};
 	IImageList_GetIcon(list, info.iIcon, ILD_TRANSPARENT, &icon);
 	IImageList_Release(list);
-	return icon; // Caller is responsible for calling DestroyIcon 
+	return icon; // Caller is responsible for calling DestroyIcon
 }
 
 static bool IsDarkModeEnabled(void)
@@ -418,7 +456,7 @@ static bool IsKeyDown(u32 key)
 	return (bool)(GetAsyncKeyState(key) & 0x8000);
 }
 
-static void PrintWindowHandle(handle hwnd)
+static void PrintWindowHandle(handle hwnd) // PrintWindow already taken
 {
 	if (hwnd) {
 		string filepath = GetFilepath(hwnd);
@@ -461,7 +499,7 @@ static void ReportWindowHandle(handle hwnd, handle target)
 	string name = GetFilename(path.text, false);
 
 	u16 buffer[2048];
-	StringCchPrintfW(buffer, countof(buffer)-1, L"{%s, %s}\n\nAdd to blacklist (NOT WORKNG YET, TODO!)?", name.text, class.text);
+	StringCchPrintfW(buffer, countof(buffer)-1, L"{%s, %s}\n\nAdd to blacklist?\n\nNOT WORKNG YET, DOES NOTHING, TODO!", name.text, class.text);
 	return MessageBoxW(hwnd, buffer, L"cmdtab", MB_YESNO | MB_ICONASTERISK | MB_TASKMODAL) == IDYES;
 }
 
@@ -470,15 +508,17 @@ static void StealFocus(void)
 	// Oh my, the fucking rabbit hole...
 	// This is a hack (one of many flavors) to bypass the restrictions on setting the foreground window
 	// https://github.com/microsoft/PowerToys/blob/7d0304fd06939d9f552e75be9c830db22f8ff9e2/src/modules/fancyzones/FancyZonesLib/util.cpp#L376
-	// gg windows ¯\_(ツ)_/¯
+	//
+	// There is also a subtle issue with the Alt-key functionality of windows with menus, where
+	// the menu selection will get stuck until the window gets an AltUp event. It doesn't seem
+	// to help to send the AltUp event globally; I think the window must receive it to reset its
+	// menu selection. But this differs from Windows' normal AltTab widget, which somehow bypasses
+	// this issue. I've confirmed that the AltTab window does something different because there are
+	// subtle observable behavior differences in the menu selection when Windows' normal AltTab is
+	// invoked vs. cmdtab. In the end, I figured out that instead of sending an AltUp event, if I
+	// just steal focus as quickly as possible upon activation, the menu selection does not get stuck,
+	// and the behavior exhibited perfectly matches Windows' normal AltTab. Success!
 	SendInput(1, &(INPUT){.type = INPUT_KEYBOARD}, sizeof(INPUT));
-}
-static void SendAltUp(void)
-{
-	// Actually this does more for me. Instead of only posting a mere input event, I make that input
-	// event specifically be an Alt keyup event, which somewhat compensates for the stray initial
-	// Alt keydown event that I can't undo.
-	SendInput(1, &(INPUT){.type = INPUT_KEYBOARD, .ki.wVk = VK_MENU, .ki.dwFlags = KEYEVENTF_KEYUP}, sizeof(INPUT));
 }
 
 static void DisplayWindow(handle hwnd) // ShowWindow already taken
@@ -489,8 +529,7 @@ static void DisplayWindow(handle hwnd) // ShowWindow already taken
 		} else {
 			ShowWindow(hwnd, SW_SHOWNA);
 		}
-		StealFocus();
-		if (SetForegroundWindow(hwnd)) {
+		if (SetForegroundWindow(GetAppHost(hwnd))) {
 			Print(L"switch to ");
 			PrintWindowHandle(hwnd);
 		} else {
@@ -506,7 +545,7 @@ static void PreviewWindow(handle hwnd)
 {
 	//typedef HRESULT (__stdcall *DwmpActivateLivePreview)(bool peekOn, handle hPeekWindow, handle hTopmostWindow, u32 peekType1or3, i64 newForWin10);
 	//DwmpActivateLivePreview(true, hwnd, gui, 3, 0);
-	
+
 	// TODO "perviewing" not implemented yet. Have to find a way to show windows without changing their Z-Order (i.e. "previewing" them)
 
 	// NOT IMPLEMENTED YET, FALLBACK TO SHOW
@@ -518,38 +557,36 @@ static void HideWindow(handle hwnd)
 	ShowWindow(hwnd, SW_HIDE); // Yes, call ShowWindow to hide window...
 }
 static void MinimizeWindow(handle hwnd)
-{	
-	SendMessageW(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+{
+	PostMessageW(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
 }
 static void QuitWindow(handle hwnd) // CloseWindow already taken
 {
 	Print(L"close window ");
 	PrintWindowHandle(hwnd);
-	SendMessageW(hwnd, WM_CLOSE, 0, 0);
+	PostMessageW(hwnd, WM_CLOSE, 0, 0);
 }
-//static void TerminateWindowProcess(handle hwnd)
-//{
-//	u32 pid;
-//	GetWindowThreadProcessId(hwnd, &pid);
-//	handle process = OpenProcess(PROCESS_TERMINATE, false, pid); // NOTE See GetProcessHandleFromHwnd
-//	if (!process || process == INVALID_HANDLE_VALUE || !TerminateProcess(process, 0)) {
-//		Print(L"ERROR couldn't terminate process with pid: %u\n", pid);
-//	}
-//	if (process) CloseHandle(process);
-//	return;
-//}
+static void TerminateWindowProcess(handle hwnd)
+{
+	u32 pid;
+	GetWindowThreadProcessId(hwnd, &pid);
+	handle process = OpenProcess(PROCESS_TERMINATE, false, pid); // NOTE See GetProcessHandleFromHwnd
+	if (!process || process == INVALID_HANDLE_VALUE || !TerminateProcess(process, 0)) {
+		Print(L"ERROR couldn't terminate process with pid: %u\n", pid);
+	}
+	if (process) CloseHandle(process);
+}
 
 //==============================================================================
 // cmdtab impl
 //==============================================================================
 
-// Go from supporting max. 256 windows @ 690kb to supporting max. 8192 windows @ 340kb 
+// Go from supporting max. 256 windows @ 690kb to supporting max. 8192 windows @ 340kb
 //  (49% memory decrease, 3200% capacity increase),
 //  but sectioned into max. 128 apps, each with max. 64 windows
 //  And then again reduce another 40%, from 340kb to 200kb, by reducing string size from MAX_PATH*2 to MAX_PATH
-#define APPS_MAX 128
-#define WNDS_MAX  64
-#define QUEUE_MAX 64
+#define APPS_MAX     128
+#define WINDOWS_MAX   64
 #define BLACKLIST_MAX 32
 
 struct config {
@@ -560,7 +597,7 @@ struct config {
 	bool switchApps;
 	bool switchWindows;
 	bool fastSwitchingForApps; // TODO
-	bool fastSwitchingForWindows; // TODO
+	bool fastSwitchingForWindows;
 	bool showSwitcherForApps;
 	bool showSwitcherForWindows;
 	u32 showSwitcherDelay;
@@ -582,63 +619,49 @@ struct config {
 };
 
 struct app {
-	string path;                  // Full path of executable.
+	string path;                  // Full path of app executable.
 	string name;                  // Product description/name, or filename without extension as fallback.
 	handle icon;                  // Big app icon.
-	handle windows[WNDS_MAX];     // Filtered windows that can be switched to.
+	handle windows[WINDOWS_MAX];  // App windows that can be switched to.
 	size windowsCount;            // Number of elements in 'windows' array.
 };
 
-static struct app Apps[APPS_MAX]; // Filtered apps that are displayed in switcher.
+static struct app Apps[APPS_MAX]; // Apps that are displayed in switcher.
 static size AppsCount;            // Number of elements in 'Apps' array.
 static struct app *SelectedApp;   // Pointer to one of the elements in 'Apps' array. The app for the 'SelectedWindow'.
 static handle *SelectedWindow;    // Currently selected window in switcher. Non-NULL indicates switcher is active.
-static handle RestorableWindow;   // Whatever window was foreground when switcher showed. Does not need to be in filtered 'Apps' array.
-static handle Queue[QUEUE_MAX];   // Defer window activations while the switcher is active to preserve app and window order in switcher.
-static size QueueCount;           // The activation queue is committed when the switcher deactivates or if the queue is about to overflow.
+static handle RestorableWindow;   // Whatever window was foreground when switcher was activated. Does not need to be in filtered 'Apps' array.
+static handle History[APPS_MAX];  // TODO REWRITE Defer window activations while the switcher is active to preserve app and window order in switcher.
+static size HistoryCount;         // TODO REWRITE The activation queue is committed when the switcher deactivates or if the queue is about to overflow.
 static handle Switcher;           // Handle for main window (i.e. switcher).
 static handle DrawingContext;     // Drawing context for double-buffered drawing of main window.
 static handle DrawingBitmap;      // Off-screen bitmap used for double-buffered drawing of main window.
 static RECT DrawingRect;          // Size of the off-screen bitmap.
 static u16 Keyboard[16];          // 256 bits to track key repeat for low-level keyboard hook.
-static i32 MouseX, MouseY;        // Mouse position.
-static struct config Config;      // 
+static i32 MouseX, MouseY;        // Mouse position, for highlighting and clicking app icons.
+static struct config Config;      // cmdtab settings
 
 static void PrintApps(void)
 {
+	int windowsCount = 0;
 	for (int i = 0; i < AppsCount; i++) {
 		Print(L"%i ", i);
 		struct app *app = &Apps[i];
 		PrintWindowHandle(app->windows[0]);
+		windowsCount += app->windowsCount;
 		for (int j = 1; j < app->windowsCount; j++) {
 			Print(L"  %i ", j);
 			PrintWindowHandle(app->windows[j]);
 		}
 	}
+	Print(L"%i apps %i windows, %i history:\n", AppsCount, windowsCount, HistoryCount);
+	// And print History
+	for (int i = 0; i < HistoryCount; i++) {
+		Print(L"%i ", i);
+		PrintWindowHandle(History[i]);
+	}
 }
 
-static bool WindowIsIgnored(handle hwnd)
-{
-	// Raymond Chen: https://devblogs.microsoft.com/oldnewthing/20200302-00/?p=103507
-	if (!IsWindowVisible(hwnd)) {
-		return true;
-	}
-	int cloaked = 0;
-	DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof cloaked); // Windows 8
-	if (cloaked) {
-		return true;
-	}
-	// "A tool window [i.e. WS_EX_TOOLWINDOW] does not appear in the taskbar or
-	// in the dialog that appears when the user presses ALT-TAB." (docs)
-	if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) {
-		return true;
-	}
-	if (Config.ignoreMinimized && IsIconic(hwnd)) { // TODO Hmm, rework or remove this feature
-		// Atm, 'ignoreMinimized' affects both Alt-Tilde/Backquote and Alt-Tab (which may be unexpected. Maybe it should only apply to subwindow switching? Etc.) TODO Should this be called 'restore_minimized'?
-		return true;
-	}
-	return false;
-}
 static bool WindowIsBlacklisted(string *filename, string *windowClass)
 {
 	#define wcseq(str1, str2) (wcscmp(str1, str2) == 0)
@@ -666,19 +689,77 @@ static bool WindowIsBlacklisted(string *filename, string *windowClass)
 	return false;
 }
 
-static bool AddWindow(handle hwnd)
+static void AddToHistory(handle hwnd) {
+	// Get hosted window in case of UWP host
+	hwnd = GetCoreWindow(hwnd);
+
+	Print(L"activate window ");
+	PrintWindowHandle(hwnd);
+
+	if (History[0] == hwnd) {
+		Print(L"  already first in history\n");
+		return;
+	}
+	// Potentially find 'hwnd' in activation list and shift other hwnds down to position of 'hwnd' and then put 'hwnd' first
+	for (int i = 1; i < HistoryCount; i++) {
+		if (History[i] == hwnd) {
+			memmove(&History[1], &History[0], sizeof History[0] * i);
+			History[0] = hwnd;
+			return;
+		}
+	}
+
+	// 'hwnd' doesn't already exist in activation list; so validate and add it
+
+	// Basic checks for eligibility in Alt-Tab
+	if (!IsAltTabWindow(hwnd)) {
+		Print(L"ignored ");
+		PrintWindowHandle(hwnd);
+		return;
+	}
+	if (Config.ignoreMinimized && IsIconic(hwnd)) { // TODO Hmm, rework or remove this feature. Atm, 'ignoreMinimized' affects both Alt-Tilde/Backquote and Alt-Tab (which may be unexpected. Maybe it should only apply to subwindow switching? Etc.) TODO Should this be called 'restore_minimized'?
+		return;
+	}
+	// Get module filepath, abort if failed (most likely access denied)
+	string filepath = GetFilepath(hwnd);
+	if (!filepath.ok) {
+		return; // Don't have to print error, since GetFilepath already does that
+	}
+	// Check window against user-defined blacklist
+	string filename = GetFilename(filepath.text, false);
+	string class = GetWindowClass(hwnd);
+	if (WindowIsBlacklisted(&filename, &class)) {
+		Print(L"blacklisted ");
+		PrintWindowHandle(hwnd);
+		return;
+	}
+
+	// 'hwnd' is valid and should be added
+
+	// Shift all hwnds down one position and then put 'hwnd' first
+	if (HistoryCount < countof(History)) {
+		memmove(&History[1], &History[0], sizeof History[0] * ++HistoryCount);
+		History[0] = hwnd;
+	}
+}
+static void AddToSwitcher(handle hwnd)
 {
 	// 1. Get hosted window in case of UWP host
+	/*dbg*/bool isUWP = false;
 	handle coreWindow = GetCoreWindow(hwnd);
 	if (hwnd != coreWindow) {
 		hwnd = coreWindow;
-		Print(L"uwp");
-		//PrintWindowHandle(hwnd);
+		/*dbg*/isUWP = true;
 	}
 	// 2. Basic checks for eligibility in Alt-Tab
-	if (WindowIsIgnored(hwnd)) {
+	if (!IsAltTabWindow(hwnd)) {
 		Print(L"ignored ");
 		PrintWindowHandle(hwnd);
+		return;
+	}
+	if (Config.ignoreMinimized && IsIconic(hwnd)) {
+		// TODO Hmm, rework or remove this feature
+		// Atm, 'ignoreMinimized' affects both Alt-Tilde/Backquote and Alt-Tab (which may be unexpected. Maybe it should only apply to subwindow switching? Etc.) TODO Should this be called 'restore_minimized'?
 		return;
 	}
 	// 3. Get module filepath, abort if failed (most likely access denied)
@@ -713,7 +794,7 @@ static bool AddWindow(handle hwnd)
 			name = filename; // filename from earlier when checking blacklist
 		}
 		// Since I reset by truncating (setting AppsCount to 0), make sure to overwrite all struct fields when reusing array slots
-		app = &Apps[AppsCount++]; 
+		app = &Apps[AppsCount++];
 		if (app->icon) DestroyIcon(app->icon); // In fact, I have to do a little lazy cleanup
 		app->path = filepath;
 		app->name = name;
@@ -726,30 +807,11 @@ static bool AddWindow(handle hwnd)
 	}
 	// 7. Add window to app's window list
 	app->windows[app->windowsCount++] = hwnd;
-	Print(L"add window ");
+	Print(L"add window %s", isUWP ? L"(uwp) " : L"");
 	PrintWindowHandle(hwnd);
 }
-static bool _AddWindow(handle hwnd, i64 lparam)
+static void ActivateWindow(handle hwnd)
 {
-	// EnumWindowsProc used by AddWindow
-	// Call AddWindow with every top-level window enumerated by EnumWindows
-	AddWindow(hwnd);
-	return true; // Return true to continue EnumWindows
-}
-static void UpdateApps(void)
-{
-	i64 start = StartMeasuring();
-	{
-		// Rebuild the whole window list and measure how long it takes
-		AppsCount = 0;
-		EnumWindows(_AddWindow, 0); // _AddWindow calls AddWindow with every top-level window enumerated by EnumWindows 
-	}
-	Print(L"elapsed %llims\n", FinishMeasuring(start));
-}
-static void ActivateWindow(handle hwnd) {
-	Print(L"activate window ");
-	PrintWindowHandle(hwnd);
-	// Find existing app for hwnd
 	struct app *app = null;
 	handle *window = null;
 	for (int i = 0; i < AppsCount; i++) {
@@ -760,109 +822,70 @@ static void ActivateWindow(handle hwnd) {
 				break;
 			}
 		}
+		if (window) break;
 	}
 	// Put window first in app's window list and app first in app list
 	if (window) {
-		// Lots of noise here. Don't worry, it's just for detailed printing. The business logic fits on 10 simple lines
-
 		if (window > &app->windows[0]) { // Don't shift if already first
-			//print(L"  window list before reorder\n");
-			//for (int i = 0; i < app->windowsCount; i++) {
-			//	print(L"    %i", i);
-			//	printhwnd(app->windows[i]);
-			//}
-
-			{
-				// Shift other windows down to position of 'window' and then put 'window' first
-				memmove(&app->windows[1], &app->windows[0], sizeof app->windows[0] * (window-app->windows)); // i.e. index
-				app->windows[0] = hwnd;
-			}
-
-			//print(L"  window list after reorder\n");
-			//for (int i = 0; i < app->windowsCount; i++) {
-			//	print(L"    %i", i);
-			//	printhwnd(app->windows[i]);
-			//}
-		} else {
-			Print(L"  already first in window list\n");
+			// Shift other windows down to position of 'window' and then put 'window' first
+			memmove(&app->windows[1], &app->windows[0], sizeof app->windows[0] * (window - app->windows)); // i.e. index
+			app->windows[0] = hwnd;
 		}
-
 		if (app > &Apps[0]) { // Don't shift if already first
-
-			//print(L"  app list before reorder\n");
-			//for (int i = 0; i < AppsCount; i++) {
-			//	print(L"    %i", i);
-			//	printhwnd(apps[i].windows[0]);
-			//}
-
-			{
-				// Shift other apps down to position of 'app' and then put 'app' first
-				struct app save = *app; // This is a 1.6kb copy
-				memmove(&Apps[1], &Apps[0], sizeof Apps[0] * (app-Apps)); // i.e. index
-				Apps[0] = save;
-			}
-
-			//print(L"  app list after reorder\n");
-			//for (int i = 0; i < AppsCount; i++) {
-			//	print(L"    %i", i);
-			//	printhwnd(apps[i].windows[0]);
-			//}
-		} else {
-			Print(L"  already first in app list\n");
+			// Shift other apps down to position of 'app' and then put 'app' first
+			struct app temp = *app; // This is a 1.6kb copy
+			memmove(&Apps[1], &Apps[0], sizeof Apps[0] * (app - Apps)); // i.e. index
+			Apps[0] = temp;
 		}
-	} else {
-		Error(Switcher, L"ERROR activated window not found");
 	}
+	//Print(L"  already first in window list\n");
+	//print(L"  window list before reorder\n");
+	//for (int i = 0; i < app->windowsCount; i++) {
+	//	print(L"    %i", i);
+	//	printhwnd(app->windows[i]);
+	//}
+	//print(L"  window list after reorder\n");
+	//for (int i = 0; i < app->windowsCount; i++) {
+	//	print(L"    %i", i);
+	//	printhwnd(app->windows[i]);
+	//}
+	//Print(L"  already first in app list\n");
+	//print(L"  app list before reorder\n");
+	//for (int i = 0; i < AppsCount; i++) {
+	//	print(L"    %i", i);
+	//	printhwnd(apps[i].windows[0]);
+	//}
+	//print(L"  app list after reorder\n");
+	//for (int i = 0; i < AppsCount; i++) {
+	//	print(L"    %i", i);
+	//	printhwnd(apps[i].windows[0]);
+	//}
 }
-static void ProcessActivationQueue(void) {
-	Print(L"flush queue\n");
-	for (int i = 0; i < QueueCount; i++) {
-		ActivateWindow(Queue[i]);
+static bool _AddToSwitcher(handle hwnd, i64 lparam)
+{
+	// EnumWindowsProc used by AddToSwitcher
+	// Call AddToSwitcher with every top-level window enumerated by EnumWindows
+	(*((int *)lparam))++;
+	AddToSwitcher(hwnd);
+	return true; // Return true to continue EnumWindows
+}
+static void UpdateApps(void)
+{
+	// Rebuild the whole window list and measure how long it takes
+	i64 start = StartMeasuring();
+	int windowsCount = 0;
+	AppsCount = 0;
+	EnumWindows(_AddToSwitcher, &windowsCount); // _AddToSwitcher calls AddToSwitcher with every top-level window enumerated by EnumWindows
+	AddToHistory(GetForegroundWindow());
+	for (int i = HistoryCount-1; i >= 0; i--) {
+		ActivateWindow(History[i]);
 	}
-	QueueCount = 0;
+	Print(L"%i windows, %llims elapsed\n", windowsCount, FinishMeasuring(start));
+	PrintApps();
 }
 
-static void _DisplaySwitcher(handle hwnd, u32 msg, u64 eventid, u32 time)
-{
-	// TimerProc used by DisplaySwitcher
-	// Call DisplaySwitcher with 0 delay when timer activates
-	void DisplaySwitcher(u32 delay);
-	DisplaySwitcher(0);
-}
-static void DisplaySwitcher(u32 delay)
-{
-	KillTimer(Switcher, /*timerid*/ 1);
-	if (delay > 0) {
-		SetTimer(Switcher, /*timerid*/ 1, delay, _DisplaySwitcher); // _DisplaySwitcher calls DisplaySwitcher with 0 delay
-		return;
-	}
-	ShowWindow(Switcher, SW_SHOWNA);
-	//LockSetForegroundWindow
-}
-static void CancelSwitcher(bool restore) 
-{
-	Print(L"cancel/close\n");
-	KillTimer(Switcher, /*timerid*/ 1);
-	HideWindow(Switcher);
-	if (restore) { 
-		// TODO Check that the restore window is not the second most recently
-		//      activated window (after my own switcher window), so that I
-		//      don't needlessly switch to the window that will naturally
-		//      become activated once my switcher window hides
-		DisplayWindow(RestorableWindow);
-	}
-	// Reset selection
-	SelectedApp = null;
-	SelectedWindow = null;
-	RestorableWindow = null;
-	// Can commit activation queue now
-	ProcessActivationQueue();
-	// And prune windows TODO This should not be on cancel, but on DisplaySwitcher
-	//prunewindows();
-}
 static void SelectFirstWindow(void)
 {
-	UpdateApps();
 	if (AppsCount > 0) {
 		SelectedApp = &Apps[0];
 		SelectedWindow = &Apps[0].windows[0];
@@ -874,7 +897,7 @@ static void SelectFirstWindow(void)
 static void SelectNextWindow(bool applevel, bool reverse, bool wrap)
 {
 	if (!SelectedApp || !SelectedWindow) {
-		Debug();
+		Debug(L"invalid state: no SelectedApp or no SelectedWindow");
 	}
 	/*dbg*/struct app *oldApp = SelectedApp;
 	/*dbg*/handle *oldWindow = SelectedWindow;
@@ -939,8 +962,8 @@ static void ResizeSwitcher(void)
 		DrawingRect = resized;
 		DrawingContext = CreateCompatibleDC(context);
 		DrawingBitmap = CreateCompatibleBitmap(context, DrawingRect.right - DrawingRect.left, DrawingRect.bottom - DrawingRect.top);
-		handle oldbitmap = (handle)SelectObject(DrawingContext, DrawingBitmap);
-		DeleteObject(oldbitmap);
+		handle oldBitmap = (handle)SelectObject(DrawingContext, DrawingBitmap);
+		DeleteObject(oldBitmap);
 		ReleaseDC(Switcher, context);
 	}
 
@@ -948,7 +971,7 @@ static void ResizeSwitcher(void)
 }
 static void RedrawSwitcher(void)
 {
-	// TODO Use 'Config.style' 
+	// TODO Use 'Config.style'
 
 	#define BACKGROUND   RGB(32, 32, 32) // dark mode?
 	#define TEXT_COLOR   RGB(235, 235, 235)
@@ -1042,23 +1065,23 @@ static void RedrawSwitcher(void)
 			textRect.right = right;
 			textRect.bottom = rect.bottom;
 
-			i32 width_diff = textWidth - (textRect.right - textRect.left);
-			if (width_diff > 0) {
+			i32 widthDiff = textWidth - (textRect.right - textRect.left);
+			if (widthDiff > 0) {
 				// textRect is too small for text, grow the rect
-				textRect.left -= (i32)ceil(width_diff / 2.0);
-				textRect.right += (i32)floor(width_diff / 2.0);
+				textRect.left -= (i32)ceil(widthDiff / 2.0);
+				textRect.right += (i32)floor(widthDiff / 2.0);
 			}
 
 			textRect.bottom -= ICON_PAD; // *** this lifts the app text up a little ***
 
 			// If the app name, when centered, extends past window bounds, adjust label position to be inside window bounds
-			if (textRect.left < 0) {
-				textRect.right += ICON_PAD + abs(textRect.left);
-				textRect.left   = ICON_PAD + 0;
-			}
 			if (textRect.right > rect.right) {
 				textRect.left -= (textRect.right - rect.right) + ICON_PAD;
 				textRect.right = rect.right - ICON_PAD;
+			}
+			if (textRect.left < 0) {
+				textRect.right += ICON_PAD + abs(textRect.left);
+				textRect.left   = ICON_PAD + 0;
 			}
 
 			///* dbg */ FillRect(DrawingContext, &textRect, CreateSolidBrush(RGB(255, 0, 0))); // Check the size of the text box
@@ -1067,7 +1090,42 @@ static void RedrawSwitcher(void)
 	}
 }
 
-static void QuitWindows(handle hwnd)
+static void _DisplaySwitcher(handle hwnd, u32 msg, u64 eventid, u32 time)
+{
+	// TimerProc used by DisplaySwitcher
+	// Call DisplaySwitcher with 0 delay when timer activates
+	void DisplaySwitcher(u32 delay);
+	DisplaySwitcher(0);
+}
+static void DisplaySwitcher(u32 delay)
+{
+	KillTimer(Switcher, /*timerid*/ 1);
+	if (delay > 0) {
+		SetTimer(Switcher, /*timerid*/ 1, delay, _DisplaySwitcher); // _DisplaySwitcher calls DisplaySwitcher with 0 delay
+		return;
+	}
+	ShowWindow(Switcher, SW_SHOWNA);
+	//LockSetForegroundWindow
+}
+static void CancelSwitcher(bool restore)
+{
+	Print(L"cancel/close\n");
+	KillTimer(Switcher, /*timerid*/ 1);
+	HideWindow(Switcher);
+	if (restore) {
+		// TODO Check that the restore window is not the second most recently
+		//      activated window (after my own switcher window), so that I
+		//      don't needlessly switch to the window that will naturally
+		//      become activated once my switcher window hides
+		DisplayWindow(RestorableWindow);
+	}
+	// Reset selection
+	SelectedApp = null;
+	SelectedWindow = null;
+	RestorableWindow = null;
+}
+
+static void QuitWindows(handle hwnd) // Alternative to TerminateWindowProcess
 {
 	if (AppsCount <= 0) {
 		return;
@@ -1094,21 +1152,15 @@ static bool SetKey(u32 key, bool down)
 	#define CHAR_BIT 8
 	#endif
 
-	bool wasdown = Keyboard[key / CHAR_BIT] & (1 << (key % CHAR_BIT)); // getbit
+	bool wasdown = Keyboard[key/CHAR_BIT] & (1 << (key % CHAR_BIT)); // getbit
 	if (down) {
-		Keyboard[key / CHAR_BIT] |= (1 << (key % CHAR_BIT)); // setbit1
+		Keyboard[key/CHAR_BIT] |= (1 << (key % CHAR_BIT)); // setbit1
 	} else {
-		Keyboard[key / CHAR_BIT] &= ~(1 << (key % CHAR_BIT)); // setbit0
+		Keyboard[key/CHAR_BIT] &= ~(1 << (key % CHAR_BIT)); // setbit0
 	}
 	return wasdown && down; // Return true if this was a key repeat
 }
-static void SyncKeys(void)
-{
-	for (int i = 0; i < sizeof Keyboard * CHAR_BIT; i++) {
-		SetKey(i, (bool)(GetAsyncKeyState(i) & 0x8000));
-	}
-}
-static  i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
+static i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
 {
 	if (code < 0) { // "If code is less than zero, the hook procedure must pass the message to..." blah blah blah read the docs
 		return CallNextHookEx(null, code, wparam, lparam);
@@ -1117,6 +1169,12 @@ static  i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
 	KBDLLHOOKSTRUCT *kbd = lparam;
 	u32 keyCode = kbd->vkCode;
 	bool keyDown = !(bool)(kbd->flags & LLKHF_UP);
+	bool injected = (kbd->flags & LLKHF_INJECTED) == LLKHF_INJECTED;
+
+	if (injected) {
+		Print(L"INJECTED INPUT\n");
+		//return CallNextHookEx(null, code, wparam, lparam);
+	}
 
 	if (!SelectedWindow) {
 
@@ -1134,12 +1192,14 @@ static  i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
 
 		// First Alt-Tab
 		if (key1Down && mod1Held && Config.switchApps) {
+			StealFocus();
+			UpdateApps();
 			SelectFirstWindow(); // Initialize selection
-			if (*SelectedWindow == GetForegroundWindow()) { // Don't select next when on blank desktop
+			if (*SelectedWindow == GetCoreWindow(GetForegroundWindow())) { // Don't select next when on blank desktop
 				SelectNextWindow(true, shiftHeld, !Config.wrapbump || !keyRepeat);
 			}
 			if (Config.showSwitcherForApps) {
-				ResizeSwitcher(); // NOTE Must call resizegui after activate, before RedrawSwitcher & before showgui
+				ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before DisplaySwitcher
 				RedrawSwitcher();
 				DisplaySwitcher(Config.showSwitcherDelay);
 			}
@@ -1152,10 +1212,12 @@ static  i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
 		}
 		// First Alt-Tilde/Backquote
 		if (key2Down && mod2Held && Config.switchWindows) {
+			StealFocus();
+			UpdateApps();
 			SelectFirstWindow(); // Initialize selection
 			SelectNextWindow(false, shiftHeld, !Config.wrapbump || !keyRepeat);
 			if (Config.showSwitcherForWindows) {
-				ResizeSwitcher(); // NOTE Must call resizegui after activate, before RedrawSwitcher & before showgui
+				ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before DisplaySwitcher
 				RedrawSwitcher();
 				DisplaySwitcher(Config.showSwitcherDelay);
 			}
@@ -1178,13 +1240,12 @@ static  i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
 
 		if (mod1Up || mod2Up) {
 			// Alt keyup - switch to selected window
-			// Always pass/never consume alt/mod key up, because:
-			// 1) cmdtab never hooks Alt keydowns
-			// 2) cmdtab hooks Alt keyups, but always passes it through on pain
-			//    of getting a stuck Alt key because of point 1
+			// Always pass/never consume mod key up, because:
+			// 1) cmdtab never hooks mod keydowns
+			// 2) cmdtab hooks mod keyups, but always passes it through on pain of getting a stuck Alt key because of point 1
+			StealFocus();
 			DisplayWindow(*SelectedWindow);
 			CancelSwitcher(false);
-			//SendAltUp();
 			goto passMessage; // See note above on "Alt keyup" on why I don't consume this message
 		} else {
 
@@ -1205,7 +1266,7 @@ static  i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
 			if (key1Down || (nextDown || prevDown)) {
 				SelectNextWindow(true, shiftHeld || prevDown, !Config.wrapbump || !keyRepeat);
 				if (Config.showSwitcherForApps) {
-					ResizeSwitcher(); // NOTE Must call resizegui after activate, before RedrawSwitcher & before showgui
+					ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before DisplaySwitcher
 					RedrawSwitcher();
 					DisplaySwitcher(Config.showSwitcherDelay);
 				}
@@ -1222,7 +1283,7 @@ static  i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
 			if (key2Down) {
 				SelectNextWindow(false, shiftHeld, !Config.wrapbump || !keyRepeat);
 				if (Config.showSwitcherForWindows) {
-					ResizeSwitcher(); // NOTE Must call resizegui after activate, before RedrawSwitcher & before showgui
+					ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before DisplaySwitcher
 					RedrawSwitcher();
 					DisplaySwitcher(Config.showSwitcherDelay);
 				}
@@ -1276,9 +1337,13 @@ static  i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
 			}
 			// Alt-Q - close all windows of selected application
 			if (keyQDown) {
-				QuitWindows(*SelectedWindow);
+				TerminateWindowProcess(*SelectedWindow);
+				if (SelectedApp == &Apps[AppsCount-1] && AppsCount > 1) {
+					SelectedApp--;
+				}
+				//QuitWindows(*SelectedWindow);
 				UpdateApps();
-				ResizeSwitcher(); // NOTE Must call resizegui after activate, before RedrawSwitcher & before showgui
+				ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before DisplaySwitcher
 				RedrawSwitcher();
 				goto consumeMessage;
 			}
@@ -1286,7 +1351,7 @@ static  i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
 			if (keyWDown || deleteDown) {
 				QuitWindow(*SelectedWindow);
 				UpdateApps();
-				ResizeSwitcher(); // NOTE Must call resizegui after activate, before RedrawSwitcher & before showgui
+				ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before DisplaySwitcher
 				RedrawSwitcher();
 				goto consumeMessage;
 			}
@@ -1313,10 +1378,9 @@ static  i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
 
 			bool keyF11Down = keyCode == VK_F11 && keyDown;
 			bool keyF12Down = keyCode == VK_F12 && keyDown;
-			bool keyPrtScDown = keyCode == VK_SNAPSHOT && keyDown;
 
 			if (keyF12Down) {
-				Debug();
+				Debug(L"debug hotkey");
 			}
 			if (keyF11Down) {
 				PrintApps();
@@ -1334,8 +1398,12 @@ static  i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
 				Print(L"modifier passthrough\n");
 				goto passMessage;
 			}
+			// Other passthrough
+			if (keyCode == VK_SNAPSHOT) {
+				goto passMessage;
+			}
 			// Input sink - consume keystrokes when activated
-			if (!keyPrtScDown) {
+			if (true) {
 				u16 keyName[32] = {0};
 				int length = GetKeyNameTextW(kbd->scanCode << 16, keyName, countof(keyName));
 				Print(L"input sink %s %s\n", keyName, keyDown ? L"down" : L"up");
@@ -1345,18 +1413,18 @@ static  i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
 	}
 
 	passMessage:
-	//print(L"allow next hook\n");
-	return CallNextHookEx(null, code, wparam, lparam);
+		//print(L"allow next hook\n");
+		return CallNextHookEx(null, code, wparam, lparam);
 	consumeMessage:
-	// By returning a non-zero value from the hook procedure, the message
-	// is consumed and does not get passed to the target window
-	//print(L"block key event\n");
-	return 1; 
+		// By returning a non-zero value from the hook procedure, the message
+		// is consumed and does not get passed to the target window
+		//print(L"block key event\n");
+		return 1;
 }
 
 static void OnWindowCreate(void)
 {
-	
+
 }
 static void OnWindowPaint(void)
 {
@@ -1391,7 +1459,7 @@ static void OnWindowFocusChange(bool focused)
 		// foreground window, in which case it will get this message
 		// when the foreground window changes again.
 		// I'm not sure if the implementation will remain like this
-		// (i.e. not becoming foreground)--it's a little unorthodox. 
+		// (i.e. not becoming foreground)--it's a little unorthodox.
 		// But for now that's how it is.
 		Print(L"switcher lost focus\n");
 		//return 1; // Nu-uh!
@@ -1400,7 +1468,7 @@ static void OnWindowFocusChange(bool focused)
 }
 static void OnWindowMouseMove(int x, int y)
 {
-	MouseX = x; // GetMessagePos 
+	MouseX = x; // GetMessagePos
 	MouseY = y;
 	//print(L"x%i y%i\n", MouseX, MouseY);
 }
@@ -1420,13 +1488,14 @@ static void OnWindowClose(void)
 static void OnShellWindowActivated(handle hwnd)
 {
 	PrintWindowHandle(hwnd);
-	if (WindowIsIgnored(hwnd)) {
+	if (!IsAltTabWindow(hwnd)) {
 		Print(L"  ignored\n");
 	}
 	if (GetCoreWindow(hwnd) != hwnd) {
 		Print(L"  uwp: ");
 		PrintWindowHandle(GetCoreWindow(hwnd));
 	}
+	AddToHistory(hwnd);
 }
 static i64 WindowProcedure(handle hwnd, u32 message, u64 wparam, i64 lparam)
 {
@@ -1451,7 +1520,7 @@ static i64 WindowProcedure(handle hwnd, u32 message, u64 wparam, i64 lparam)
 		case WM_MOUSELEAVE:
 			OnWindowMouseLeave();
 			break;
-		case WM_CLOSE: 
+		case WM_CLOSE:
 			OnWindowClose();
 			break;
 		case WM_DESTROY:
@@ -1466,7 +1535,7 @@ static i64 WindowProcedure(handle hwnd, u32 message, u64 wparam, i64 lparam)
 					//	Print(L"CREATE window ");
 					//	handle hwnd2 = lparam;
 					//	PrintWindowHandle(hwnd2);
-					//	if (WindowIsIgnored(hwnd2)) {
+					//	if (!IsAltTabWindow(hwnd2)) {
 					//		Print(L"  ignored\n");
 					//	}
 					//	if (GetCoreWindow(hwnd2) != hwnd2) {
@@ -1480,7 +1549,7 @@ static i64 WindowProcedure(handle hwnd, u32 message, u64 wparam, i64 lparam)
 					//	Print(L"CLOSED window ");
 					//	handle hwnd2 = lparam;
 					//	PrintWindowHandle(hwnd2);
-					//	if (WindowIsIgnored(hwnd2)) {
+					//	if (!IsAltTabWindow(hwnd2)) {
 					//		Print(L"  ignored\n");
 					//	}
 					//	if (GetCoreWindow(hwnd2) != hwnd2) {
@@ -1490,9 +1559,10 @@ static i64 WindowProcedure(handle hwnd, u32 message, u64 wparam, i64 lparam)
 					//	//OnDestroyWindow((HWND)LParam);
 					//	break;
 					//}
-					case HSHELL_WINDOWACTIVATED: 
+					case HSHELL_WINDOWACTIVATED:
 					case HSHELL_FLASH:
 					case HSHELL_RUDEAPPACTIVATED:
+						break; // Disable
 						if (wparam == HSHELL_WINDOWACTIVATED) {
 							Print(L"ACTIVATED window ");
 						} else if (wparam == HSHELL_FLASH) {
@@ -1513,32 +1583,16 @@ static i64 WindowProcedure(handle hwnd, u32 message, u64 wparam, i64 lparam)
 	return 0;
 }
 
-static void EventsHookProcedure(handle hook, u32 event, handle hwnd, i32 objectid, i32 childid, u32 threadid, u32 timestamp) 
+static void EventsHookProcedure(handle hook, u32 event, handle hwnd, i32 objectid, i32 childid, u32 threadid, u32 timestamp)
 {
-	if (event == EVENT_OBJECT_UNCLOAKED) {
-		Print(L"UNCLOAKED ");
-		PrintWindowHandle(hwnd);
-		if (WindowIsIgnored(hwnd)) {
-			Print(L"  ignored\n");
-		}
-		if (GetCoreWindow(hwnd) != hwnd) {
-			Print(L"  uwp: ");
-			PrintWindowHandle(GetCoreWindow(hwnd));
-		}
-
-	}
 	if (event == EVENT_SYSTEM_FOREGROUND ||
 		event == EVENT_OBJECT_UNCLOAKED) {
-		if (SelectedWindow) { // If switcher is active window activations are queued to preserve app and window order
-			if (QueueCount >= countof(Queue)) {
-				ProcessActivationQueue(); // Flush queue if queue is about to overflow.
-				RedrawSwitcher(); // Yes, this causes weird looking GUI update. Yes, that's a very good tradeoff
-			}
-			Queue[QueueCount++] = hwnd; // Compiler complains, but the 'if (QueueCount >= countof(Queue)) ProcessActivationQueue' handles the issue
-			Print(L"Queued %p\n", hwnd);
-		} else {
-			AddWindow(hwnd);
+		if (event == EVENT_SYSTEM_FOREGROUND) {
+			Print(L"FOREGROUND window ");
+		} else if (event == EVENT_OBJECT_UNCLOAKED) {
+			Print(L"UNCLOAKED window ");
 		}
+		OnShellWindowActivated(hwnd);
 	}
 }
 
@@ -1595,21 +1649,22 @@ static void InitConfig(void)
 		.iconHorzPadding         =   8,
 		// Blacklist
 		.blacklist = {
-			{ null,                    L"ApplicationFrameWindow" },
-			//{ L"ApplicationFrameHost", null },
-			//{ L"ApplicationFrameHost", L"ApplicationFrameWindow" },
-			//{ null,                    L"Windows.UI.Core.CoreWindow" },
-			//{ null,                    L"Xaml_WindowedPopupClass" },
-			{ L"SearchHost",           L"Windows.UI.Core.CoreWindow" },
-			//{ L"explorer",             L"ApplicationFrameWindow" },
-			//{ L"explorer",             L"ApplicationManager_DesktopShellWindow" },
-			//{ L"TextInputHost",        null },
+			{ null,                       L"ApplicationFrameWindow" },
+			//{ L"ApplicationFrameHost",  null },
+			//{ L"ApplicationFrameHost",  L"ApplicationFrameWindow" },
+			//{ null,                     L"Windows.UI.Core.CoreWindow" },
+			//{ null,                     L"Xaml_WindowedPopupClass" },
+			{ L"SearchHost",              L"Windows.UI.Core.CoreWindow" },
+			{ L"StartMenuExperienceHost", L"Windows.UI.Core.CoreWindow" },
+			//{ L"explorer",              L"ApplicationFrameWindow" },
+			//{ L"explorer",              L"ApplicationManager_DesktopShellWindow" },
+			//{ L"TextInputHost",         null },
 		},
 	};
 	// Initialize runtime-dependent settings. This one is dependent on user's current kbd layout
 	Config.hotkeyForWindows.key = MapVirtualKeyW(0x29, MAPVK_VSC_TO_VK_EX);
 	Config.darkmode = IsDarkModeEnabled();
-	
+
 	Print(L"darkmode %s\n", Config.darkmode ? L"YES" : L"NO");
 }
 static void InstallKeyboardHook(handle *hook)
@@ -1624,11 +1679,11 @@ static void InstallEventsHook(handle *hook, handle *hook2)
 	// and EVENT_OBJECT_CLOAKED? EVENT_OBJECT_HOSTEDOBJECTSINVALIDATED?
 	*hook2 = SetWinEventHook(EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_UNCLOAKED, null, EventsHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
 }
-static void UninstallKeyboardHook(handle hook) 
+static void UninstallKeyboardHook(handle hook)
 {
 	UnhookWindowsHookEx(hook);
 }
-static void UninstallEventsHook(handle hook, handle hook2) 
+static void UninstallEventsHook(handle hook, handle hook2)
 {
 	UnhookWinEvent(hook);
 	UnhookWinEvent(hook2);
@@ -1676,8 +1731,7 @@ static void RunCmdTab(handle instance, u16 *args)
 {
 	handle mutex;
 	//handle mainWindow;
-	handle keyboardHook;
-	//handle winEventHook, winEventHook2;
+	handle keyboardHook, eventHook1, eventHook2;
 	if (!HasAutorunLaunchArgument(args)) {
 		AskAutorun();
 	}
@@ -1685,15 +1739,15 @@ static void RunCmdTab(handle instance, u16 *args)
 		QuitSecondInstance();
 	}
 	InitConfig();
-	InstallKeyboardHook(&keyboardHook);
-	//InstallEventsHook(&winEventHook, &winEventHook2);
 	CreateSwitcherWindow(instance);
-	RegisterShellHookWindow(Switcher);
+	InstallKeyboardHook(&keyboardHook);
+	InstallEventsHook(&eventHook1, &eventHook2);
+	//RegisterShellHookWindow(Switcher);
 	RunMessageLoop(Switcher);
-	DeregisterShellHookWindow(Switcher);
+	//DeregisterShellHookWindow(Switcher);
 	//DestroyWindow(Switcher);
 	UninstallKeyboardHook(keyboardHook);
-	//UninstallEventsHook(winEventHook, winEventHook2);
+	UninstallEventsHook(eventHook1, eventHook2);
 	QuitCmdTab(mutex);
 }
 

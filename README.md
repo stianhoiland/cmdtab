@@ -1,10 +1,9 @@
-# cmdtab[^1]
+# cmdtab
 The best Mac-style Alt-Tab window/app switcher replacement for Windows, written in the Lord's language.
 
 ![screenshot2-cropped2](https://github.com/stianhoiland/cmdtab/assets/2081712/ec5d0d61-005f-4123-b191-8d5b49d1f7db)
 
-## What's the deal?
-
+### What's the deal?
 1. On Windows Alt-Tab cycles through different windows from different apps all mixed together, showing small window previews
 2. On macOS Cmd-Tab cycles through apps, showing big, clear icons
 3. On macOS there is a separate hotkey that cycles through windows of the same app
@@ -45,4 +44,10 @@ The basics of window switching are easy to understand, but why is **cmdtab** *th
 
 That's a lot of useful stuff, and the code is small! Go read it, and learn some C while you're at it.
 
-[^1]: Keywords (you're welcome): *CmdTab for Windows // macOS window switcher on Windows // Alt-Tab replacement alternative // Mac style Alt-Tab window switching replacement for Windows*
+## Buildling from source
+1. `git clone https://github.com/stianhoiland/cmdtab.git`
+2. `cd cmdtab`
+3. `mkdir build`
+4. `cmake -G"Visual Studio 17 2022" -B build`
+5. *(in developer console)* `devenv build\cmdtab.sln /Build "MinSizeRel|x64"`
+6. *(run cmdtab)* `build\MinSizeRel\cmdtab.exe`
