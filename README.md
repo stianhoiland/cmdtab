@@ -45,9 +45,11 @@ The basics of window switching are easy to understand, but why is **cmdtab** *th
 That's a lot of useful stuff, and the code is small! Go read it, and learn some C while you're at it.
 
 ## Buildling from source
+These instructions require `git`, `cmake`, and *Visual Studio* or *MSBuild*.
 1. `git clone https://github.com/stianhoiland/cmdtab.git`
 2. `cd cmdtab`
 3. `mkdir build`
-4. `cmake -G"Visual Studio 17 2022" -B build`
-5. *(in developer console)* `devenv build\cmdtab.sln /Build "MinSizeRel|x64"`
-6. *(run cmdtab)* `build\MinSizeRel\cmdtab.exe`
+4. `cmake -G "Visual Studio 17 2022" -B build`
+5. *(in developer console)* `devenv build\cmdtab.sln /build "MinSizeRel|x64"`
+6. or: *(in developer console)* `msbuild build\cmdtab.sln /property:Configuration=MinSizeRel`
+7. *(run cmdtab)* `build\MinSizeRel\cmdtab.exe`
