@@ -1,16 +1,16 @@
 # cmdtab
-The best Mac-style Alt-Tab window/app switcher replacement for Windows, written in the Lord's language.
+Fast and lightweight macOS-style Alt-Tab app/window switcher replacement for Windows, written in the Lord's language, C.
 
-![screenshot2-cropped2](https://github.com/stianhoiland/cmdtab/assets/2081712/ec5d0d61-005f-4123-b191-8d5b49d1f7db)
+![cmdtab-screenshot](https://github.com/stianhoiland/cmdtab/assets/2081712/ec5d0d61-005f-4123-b191-8d5b49d1f7db)
 
 ### What's the deal?
 1. On Windows Alt-Tab cycles through different windows from different apps all mixed together, showing small window previews
-2. On macOS Cmd-Tab cycles through apps, showing big, clear icons
+2. On macOS Cmd-Tab cycles through different apps, showing big, clear app icons
 3. On macOS there is a separate hotkey that cycles through windows of the same app
 
-Here's a real life comparison GIF between Alt-Tab and **cmdtab**:
+Here's a real life comparison GIF between Alt-Tab and **cmdtab** (notice the scrollbar in Alt-Tab, haha):
 
-![screenshot-comparision2](https://github.com/user-attachments/assets/440e2d71-6bbc-4299-acf5-cdc707371193)
+![comparision-gif](https://github.com/user-attachments/assets/440e2d71-6bbc-4299-acf5-cdc707371193)
 
 So, you like the way Apple does it, but you're using Windows? **cmdtab** for Windows fixes that:
 
@@ -43,6 +43,14 @@ The basics of window switching are easy to understand, but why is **cmdtab** *th
 - Press F4 while the switcher is open to quit **cmdtab**
 
 That's a lot of useful stuff, and the code is small! Go read it, and learn some C while you're at it.
+
+## Installing **cmdtab**
+There's no installation. Just download the [latest version](https://github.com/stianhoiland/cmdtab/releases/latest) from the Releases section, unzip, and run. 
+> [!TIP]
+> **cmdtab** cannot see elevated applications like Task Manager unless you "Run as administrator".
+
+### Uninstalling
+**cmdtab** leaves no trace on your system, except for a registry key if you choose to enable autorun for **cmdtab**. You can remove this registry key by using **cmdtab** itself. Just run **cmdtab** one last time before you delete `cmdtab.exe` and choose "No" to autorun. This deletes any registry key **cmdtab** has created.
 
 ## Buildling from source
 These instructions require `git`, `cmake`, and *Visual Studio* or *MSBuild*.
