@@ -344,7 +344,7 @@ static string GetAppName(string *filepath)
 		u16 codepage;
 	} *translation;
 	
-	if (!VerQueryValueW(versionInfo.data, L"\\VarFileInfo\\Translation", (void *)&translation, &(u32[1]){0})) { // or just null.........
+	if (!VerQueryValueW(versionInfo.data, L"\\VarFileInfo\\Translation", (void *)&translation, null)) {
 		goto free;
 	}
 
@@ -370,7 +370,8 @@ static string GetAppName(string *filepath)
 	}
 
 	// Fall back to base filename if "ProductName" is empty
-	goto fallback;
+	name = StringFileName(filepath, false);
+	goto free;
 
 	success:
 		name.length = value.length < countof(name.text) ? value.length : countof(name.text);
@@ -379,8 +380,6 @@ static string GetAppName(string *filepath)
 		free(versionInfo.data);
 	abort:
 		return name;
-	fallback:
-		return StringFileName(filepath, false);
 }
 
 static handle GetAppIcon(string *filepath)
@@ -454,7 +453,7 @@ static void SetAutorun(bool enabled, u16 *keyname, u16 *args)
 	string target;
 	filepath.length = GetModuleFileNameW(null, filepath.text, countof(filepath.text)-1); // Get filepath of current module
 	StringCchPrintfW(target.text, countof(target.text)-1, L"\"%s\" %s", filepath.text, args);
-	target.length = wcslen(&target.text);
+	target.length = wcslen(target.text);
 	handle regkey;
 	i32 success; // BUG Not checking 'success' below
 	if (enabled) {
@@ -890,6 +889,7 @@ static void SelectNextWindow(bool applevel, bool reverse, bool wrap)
 	if (!SelectedApp || !SelectedWindow) {
 		Error(Switcher, L"invalid state: no SelectedApp or no SelectedWindow");
 		Debug(L"invalid state: no SelectedApp or no SelectedWindow");
+		return;
 	}
 	/*dbg*/struct app *oldApp = SelectedApp;
 	/*dbg*/handle *oldWindow = SelectedWindow;
