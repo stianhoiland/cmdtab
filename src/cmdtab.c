@@ -188,44 +188,6 @@ static bool Ask(handle hwnd, u16 *fmt, ...)
 	return MessageBoxW(hwnd, buffer, L"cmdtab", MB_YESNO | MB_ICONQUESTION | MB_TASKMODAL) == IDYES;
 }
 
-static void PrintWindowX(handle hwnd) // PrintWindow already taken
-{
-	#ifdef _DEBUG
-	if (hwnd) {
-		string filepath = GetExePath(hwnd);
-		if (!filepath.ok) return;
-		string filename = StringFileName(&filepath, false);
-		string class = GetWindowClass(hwnd);
-		string title = GetWindowTitle(hwnd);
-		u16 *wsShowState        = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MINIMIZE) ? L" (minimized) " : 
-			(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MAXIMIZE) ? L" (maximized) " : L" ";
-		u16 *wsChild            = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD) ? L"child" : L"parent";
-		u16 *wsVisible          = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_VISIBLE) ? L", visible" : L", hidden";
-		u16 *exAppWindow        = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_APPWINDOW) ? L", appwindow" : L"";
-		u16 *exNoActivate       = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_NOACTIVATE) ? L", noactivate" : L"";
-		u16 *exToolWindow       = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) ? L", toolwindow" : L"";
-		u16 *exTopMost          = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) ? L", topmost" : L"";
-		u16 *wsDisabled         = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_DISABLED) ? L", disabled" : L", enabled";
-		u16 *wsPopup            = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_POPUP) ? L", popup" : L"";
-		u16 *wsOverlapped       = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_OVERLAPPED) ? L", tiled/overlapped" : L"";
-		u16 *wsDlgFrame         = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_DLGFRAME) ? L", dlgframe" : L"";
-		u16 *exDlgModalFrame    = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_DLGMODALFRAME) ? L", dlgmodalframe" : L"";
-		u16 *exLayered          = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED) ? L", layered" : L"";
-		u16 *exComposited       = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_COMPOSITED) ? L", composited" : L"";
-		u16 *exPaletteWindow    = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_PALETTEWINDOW) ? L", palettewindow" : L"";
-		u16 *exOverlappedWindow = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_OVERLAPPEDWINDOW) ? L", exoverlappedwindow" : L"";
-		Print(L"%p { %s, %s }%s\"%.32s\"", hwnd, filename.text, class.text, wsShowState, title.text);
-		Print(L" (%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s)\n",
-			wsChild, wsVisible, exAppWindow, exNoActivate, exToolWindow, exTopMost,
-			wsDisabled, wsPopup, wsOverlapped, wsDlgFrame, exDlgModalFrame, exLayered, exComposited, exPaletteWindow, exOverlappedWindow);
-	} else {
-		Print(L"null hwnd\n");
-	}
-	#else
-	Print(L"%p\n", hwnd);
-	#endif
-}
-
 static string GetWindowClass(handle hwnd)
 {
 	string class = {0};
@@ -316,6 +278,44 @@ static string GetWindowTitle(handle hwnd)
 	title.length = GetWindowTextW(hwnd, title.text, countof(title.text));
 	title.ok = (title.length > 0);
 	return title;
+}
+
+static void PrintWindowX(handle hwnd) // PrintWindow already taken
+{
+	#ifdef _DEBUG
+	if (hwnd) {
+		string filepath = GetExePath(hwnd);
+		if (!filepath.ok) return;
+		string filename = StringFileName(&filepath, false);
+		string class = GetWindowClass(hwnd);
+		string title = GetWindowTitle(hwnd);
+		u16 *wsShowState        = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MINIMIZE) ? L" (minimized) " : 
+			(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MAXIMIZE) ? L" (maximized) " : L" ";
+		u16 *wsChild            = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD) ? L"child" : L"parent";
+		u16 *wsVisible          = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_VISIBLE) ? L", visible" : L", hidden";
+		u16 *exAppWindow        = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_APPWINDOW) ? L", appwindow" : L"";
+		u16 *exNoActivate       = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_NOACTIVATE) ? L", noactivate" : L"";
+		u16 *exToolWindow       = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) ? L", toolwindow" : L"";
+		u16 *exTopMost          = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) ? L", topmost" : L"";
+		u16 *wsDisabled         = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_DISABLED) ? L", disabled" : L", enabled";
+		u16 *wsPopup            = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_POPUP) ? L", popup" : L"";
+		u16 *wsOverlapped       = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_OVERLAPPED) ? L", tiled/overlapped" : L"";
+		u16 *wsDlgFrame         = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_DLGFRAME) ? L", dlgframe" : L"";
+		u16 *exDlgModalFrame    = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_DLGMODALFRAME) ? L", dlgmodalframe" : L"";
+		u16 *exLayered          = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED) ? L", layered" : L"";
+		u16 *exComposited       = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_COMPOSITED) ? L", composited" : L"";
+		u16 *exPaletteWindow    = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_PALETTEWINDOW) ? L", palettewindow" : L"";
+		u16 *exOverlappedWindow = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_OVERLAPPEDWINDOW) ? L", exoverlappedwindow" : L"";
+		Print(L"%p { %s, %s }%s\"%.32s\"", hwnd, filename.text, class.text, wsShowState, title.text);
+		Print(L" (%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s)\n",
+			wsChild, wsVisible, exAppWindow, exNoActivate, exToolWindow, exTopMost,
+			wsDisabled, wsPopup, wsOverlapped, wsDlgFrame, exDlgModalFrame, exLayered, exComposited, exPaletteWindow, exOverlappedWindow);
+	} else {
+		Print(L"null hwnd\n");
+	}
+	#else
+	Print(L"%p\n", hwnd);
+	#endif
 }
 
 static string GetAppName(string *filepath)
