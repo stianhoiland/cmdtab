@@ -46,11 +46,22 @@ That's a lot of useful stuff, and the code is small! Go read it, and learn some 
 
 ## Installing **cmdtab**
 There's no installation. Just download the [latest version](https://github.com/stianhoiland/cmdtab/releases/latest) from the Releases section, unzip, and run. 
-> [!TIP]
-> **cmdtab** cannot see elevated applications like Task Manager unless you "Run as administrator".
+
+### Run as administrator
+**cmdtab** cannot see elevated applications like Task Manager unless you "Run as administrator", but works well otherwise.
+
+### Autorun
+> [!NOTE]
+> The autorun that **cmdtab** enables if you choose "Yes" when it prompts you about autorun is not "Run as administrator". In the future, **cmdtab** will support run automatically as administrator, but for now you must manually configure this by using the command below.
+
+It makes sense to have **cmdtab** "Run as administrator", and it makes sense to have **cmdtab** run automatically on login. Doing either is easy, but doing both, i.e. run automatically as administrator, is not so easy. The only way to run automatically as administrator is to use the Windows Task Scheduler. To create an appropriate scheduled task from the Command Prompt run this command:
+```console
+schtasks /create /sc onlogon /rl highest /tn "cmdtab elevated autorun" /tr "C:\Users\<YOUR_USER_NAME>\Downloads\cmdtab-v1.5.1-win-x86_64\cmdtab.exe --autorun"
+```
+You can further customize the scheduled task created by that command by running `taskschd.msc`.
 
 ### Uninstalling
-**cmdtab** leaves no trace on your system, except for a registry key if you choose to enable autorun for **cmdtab**. You can remove this registry key by using **cmdtab** itself. Just run **cmdtab** one last time before you delete `cmdtab.exe` and choose "No" to autorun. This deletes any registry key **cmdtab** has created.
+**cmdtab** leaves no trace on your system, except for a registry key if you choose "Yes" when  **cmdtab** prompts you about autorun (and the scheduled task mentioned above if you manually created it). You can remove this registry key by using **cmdtab** itself. Just run **cmdtab** one last time before you delete `cmdtab.exe` and choose "No" to autorun. This deletes any registry key **cmdtab** has created.
 
 ## Buildling from source
 These instructions require `git`, `cmake`, and *Visual Studio* or *MSBuild*.
