@@ -1,7 +1,12 @@
 ﻿#include <math.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <limits.h>
 
-#define UNICODE
-#define _UNICODE
+#ifdef _WIN32_WINNT
+#undef _WIN32_WINNT
+#endif
+#define _WIN32_WINNT 0x0602
 #define WIN32_LEAN_AND_MEAN
 #define _CRTDBG_MAP_ALLOC
 #define COBJMACROS
@@ -34,14 +39,21 @@
 #define NOMCX
 
 #include <windows.h>
-#include "crtdbg.h"
-#include "shellapi.h" // Only used by StringFileName for PathFindFileNameW?
-#include "shlwapi.h"
-#include "dwmapi.h"
-#include "pathcch.h"
-#include "strsafe.h"
-#include "commoncontrols.h"
+#include <crtdbg.h>
+#include <shellapi.h> // Only used by StringFileName for PathFindFileNameW?
+#include <shlwapi.h>
+#include <dwmapi.h>
+#include <pathcch.h>
+#include <strsafe.h>
+#include <initguid.h>
+#include <objbase.h>
+#include <commoncontrols.h>
 
+// Windows libraries to link:
+// dwmapi, gdi32, kernel32, ole32, pathcch, shlwapi, user32, version
+//
+// for the sake of ease when compiled using MSVC:
+#if defined(_MSC_VER) && !defined(__GNUC__) && !defined(__clang__)
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "shlwapi.lib") // Only used by StringFileName for PathFindFileNameW?
 #pragma comment(lib, "dwmapi.lib")
@@ -49,40 +61,35 @@
 #pragma comment(lib, "version.lib")
 
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='amd64' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#endif
 
 //==============================================================================
 // Utility belt
 //==============================================================================
 
-#define countof(a) (ptrdiff_t)(sizeof(a)/sizeof(*a))
-#define string(str) {str,countof(str)-1,true}
+#define countof(a) ((ssize)(sizeof(a)/sizeof(*(a))))
+#define makestring(str) {countof(str)-1,str,true}
 
-#define false 0
-#define true 1
-#define null NULL // WHY IS EVERYONE SCREAMING
+typedef long             long32; // (unsigned) int and (unsigned) long are distinct types in C, even though they have the same size ...
+typedef unsigned long   ulong32; // ... on Windows; e.g. replacing DWORD (unsigned long) with unsigned int may cause compiler warnings
 
-typedef wchar_t             u16; // "Microsoft implements wchar_t as a two-byte unsigned value."
-typedef unsigned int        u32;
-typedef unsigned long long  u64;
-typedef signed int          i32;
-typedef signed long long    i64;
-typedef signed int         bool;
-typedef ptrdiff_t          size;
-typedef void *           handle;
+typedef intptr_t           nint; // integer types of native size (32-bit or 64-bit depending on the target platform); ...
+typedef uintptr_t         nuint; // ... type names are stolen from C#
+
+typedef nint              ssize; // signed size type, standard C does not define ssize_t
+
 typedef struct string    string;
 
 struct string {
-	u16 text[MAX_PATH];
-	size length;
+	ssize length;
+	wchar_t text[MAX_PATH];
 	bool ok;
 };
 
-static const string UWPAppHostExe      = string(L"ApplicationFrameHost.exe");
-static const string UWPAppHostClass    = string(L"ApplicationFrameWindow");
-static const string UWPCoreWindowClass = string(L"Windows.UI.Core.CoreWindow");
-static const string UWPAppsPath        = string(L"C:\\Program Files\\WindowsApps");
+static const string UWPAppHostClass    = makestring(L"ApplicationFrameWindow");
+static const string UWPCoreWindowClass = makestring(L"Windows.UI.Core.CoreWindow");
 
-static bool StringsAreEqual(string *s1, string *s2)
+static bool StringsAreEqual(const string *s1, const string *s2)
 {
 	// Reverse compare strings
 	// Compare in reverse since this function is mostly used to compare file
@@ -90,17 +97,12 @@ static bool StringsAreEqual(string *s1, string *s2)
 	if (s1->length != s2->length) {
 		return false;
 	}
-	for (int i = s1->length - 1; i >= 0; i--) {
+	for (ssize i = s1->length - 1; i >= 0; i--) {
 		if (s1->text[i] != s2->text[i]) {
 			return false;
 		}
 	}
 	return true;
-}
-
-static bool StringEndsWith(string *s1, string *s2)
-{
-	return s1->length >= s2->length && !memcmp(s1->text + s1->length - s2->length, s2->text, s2->length);
 }
 
 static string StringFileName(string *filepath, bool extension)
@@ -111,29 +113,29 @@ static string StringFileName(string *filepath, bool extension)
 	if (!extension) {
 		name.ok = name.ok && SUCCEEDED(PathCchRemoveExtension(name.text, countof(name.text)));
 	}
-	name.ok = name.ok && SUCCEEDED(StringCchLengthW(name.text, countof(name.text), &name.length));
+	name.ok = name.ok && SUCCEEDED(StringCchLengthW(name.text, countof(name.text), (size_t *)&name.length));
 	return name;
 }
 
-static i64 StartMeasuring(void)
+static int64_t StartMeasuring(void)
 {
-	i64 start;
-	QueryPerformanceCounter((LARGE_INTEGER *)&start);
-	return start;
+	LARGE_INTEGER start;
+	QueryPerformanceCounter(&start);
+	return start.QuadPart;
 }
 
-static i64 FinishMeasuring(i64 start)
+static int64_t FinishMeasuring(int64_t start)
 {
-	i64 end, frequency;
-	QueryPerformanceCounter((LARGE_INTEGER *)&end);
-	QueryPerformanceFrequency((LARGE_INTEGER *)&frequency);
-	return ((end - start) * 1000) / frequency;
+	LARGE_INTEGER end, frequency;
+	QueryPerformanceCounter(&end);
+	QueryPerformanceFrequency(&frequency);
+	return ((end.QuadPart - start) * 1000) / frequency.QuadPart;
 }
 
-static void Debug(u16 *fmt, ...)
+static void Debug(wchar_t *fmt, ...)
 {
 	#ifdef _DEBUG
-	u16 buffer[2048];
+	wchar_t buffer[2048];
 	va_list args;
 	va_start(args, fmt);
 	StringCchVPrintfW(buffer, countof(buffer)-1, fmt, args);
@@ -143,10 +145,10 @@ static void Debug(u16 *fmt, ...)
 	#endif
 }
 
-static void Print(u16 *fmt, ...)
+static void Print(wchar_t *fmt, ...)
 {
 	#ifdef _DEBUG
-	u16 buffer[2048];
+	wchar_t buffer[2048];
 	va_list args;
 	va_start(args, fmt);
 	StringCchVPrintfW(buffer, countof(buffer)-1, fmt, args);
@@ -155,9 +157,9 @@ static void Print(u16 *fmt, ...)
 	#endif
 }
 
-static void Log(u16 *fmt, ...)
+static void Log(wchar_t *fmt, ...)
 {
-	u16 buffer[2048];
+	wchar_t buffer[2048];
 	va_list args;
 	va_start(args, fmt);
 	StringCchVPrintfW(buffer, countof(buffer)-1, fmt, args);
@@ -165,9 +167,9 @@ static void Log(u16 *fmt, ...)
 	OutputDebugStringW(buffer);
 }
 
-static void Error(handle hwnd, u16 *fmt, ...)
+static void Error(HWND hwnd, wchar_t *fmt, ...)
 {
-	u16 buffer[2048];
+	wchar_t buffer[2048];
 	va_list args;
 	va_start(args, fmt);
 	StringCchVPrintfW(buffer, countof(buffer)-1, fmt, args);
@@ -177,9 +179,9 @@ static void Error(handle hwnd, u16 *fmt, ...)
 	MessageBoxW(hwnd, buffer, L"cmdtab", MB_OK | MB_ICONERROR | MB_TASKMODAL);
 }
 
-static bool Ask(handle hwnd, u16 *fmt, ...)
+static bool Ask(HWND hwnd, wchar_t *fmt, ...)
 {
-	u16 buffer[2048];
+	wchar_t buffer[2048];
 	va_list args;
 	va_start(args, fmt);
 	StringCchVPrintfW(buffer, countof(buffer)-1, fmt, args);
@@ -188,7 +190,7 @@ static bool Ask(handle hwnd, u16 *fmt, ...)
 	return MessageBoxW(hwnd, buffer, L"cmdtab", MB_YESNO | MB_ICONQUESTION | MB_TASKMODAL) == IDYES;
 }
 
-static string GetWindowClass(handle hwnd)
+static string GetWindowClass(HWND hwnd)
 {
 	string class = {0};
 	class.length = GetClassNameW(hwnd, class.text, countof(class.text));
@@ -196,32 +198,32 @@ static string GetWindowClass(handle hwnd)
 	return class;
 }
 
-static bool _GetCoreWindow(handle child, i64 lparam)
+static BOOL CALLBACK _GetCoreWindow(HWND child, nint lparam)
 {
 	// EnumChildProc used by GetCoreWindow
 	// Set inout 'lparam' to hosted core window
 	string class = GetWindowClass(child);
 	if (StringsAreEqual(&class, &UWPCoreWindowClass)) {
-		*(handle *)lparam = child;
-		return false;
+		*(HWND *)lparam = child;
+		return FALSE;
 	} else {
-		return true; // Return true to continue EnumChildWindows
+		return TRUE; // Return TRUE to continue EnumChildWindows
 	}
 }
 
-static handle GetCoreWindow(handle hwnd)
+static HWND GetCoreWindow(HWND hwnd)
 {
 	string class = GetWindowClass(hwnd);
 	if (StringsAreEqual(&class, &UWPAppHostClass)) {
-		handle hwnd2 = hwnd;
-		EnumChildWindows(hwnd, _GetCoreWindow, &hwnd2); // _GetCoreWindow sets 'hwnd2' to hosted core window, if any
+		HWND hwnd2 = hwnd;
+		EnumChildWindows(hwnd, _GetCoreWindow, (nint)&hwnd2); // _GetCoreWindow sets 'hwnd2' to hosted core window, if any
 		return hwnd2;
 	} else {
 		return hwnd;
 	}
 }
 
-static handle GetAppHost(handle hwnd)
+static HWND GetAppHost(HWND hwnd)
 {
 	string class = GetWindowClass(hwnd);
 	if (StringsAreEqual(&class, &UWPCoreWindowClass)) {
@@ -231,12 +233,12 @@ static handle GetAppHost(handle hwnd)
 	}
 }
 
-static bool IsAltTabWindow(handle hwnd)
+static bool IsAltTabWindow(HWND hwnd)
 {
 	if (!IsWindowVisible(hwnd)) {
 		return false;
 	}
-	int cloaked = 0;
+	int32_t cloaked = 0;
 	DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof cloaked);
 	if (cloaked) {
 		return false;
@@ -251,17 +253,17 @@ static bool IsAltTabWindow(handle hwnd)
 	return true;
 }
 
-static string GetExePath(handle hwnd)
+static string GetExePath(HWND hwnd)
 {
 	string path = {0};
-	u32 pid;
+	ulong32 pid;
 	GetWindowThreadProcessId(hwnd, &pid);
-	handle process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
+	HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
 	if (!process || process == INVALID_HANDLE_VALUE) {
 		Print(L"WARNING couldn't open process with pid: %u\n", pid);
 		return path;
 	}
-	u32 length = countof(path.text);
+	ulong32 length = countof(path.text);
 	path.ok = QueryFullProcessImageNameW(process, 0, path.text, &length);
 	CloseHandle(process);
 	if (!path.ok) {
@@ -272,7 +274,7 @@ static string GetExePath(handle hwnd)
 	return path;
 }
 
-static string GetWindowTitle(handle hwnd)
+static string GetWindowTitle(HWND hwnd)
 {
 	string title = {0};
 	title.length = GetWindowTextW(hwnd, title.text, countof(title.text));
@@ -280,32 +282,32 @@ static string GetWindowTitle(handle hwnd)
 	return title;
 }
 
-static void PrintWindowX(handle hwnd) // PrintWindow already taken
+static void PrintWindowX(HWND hwnd) // PrintWindow already taken
 {
 	#ifdef _DEBUG
 	if (hwnd) {
 		string filepath = GetExePath(hwnd);
 		if (!filepath.ok) return;
-		string filename = StringFileName(&filepath, false);
+		string filename = StringFileName(&filepath, FALSE);
 		string class = GetWindowClass(hwnd);
 		string title = GetWindowTitle(hwnd);
-		u16 *wsShowState        = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MINIMIZE) ? L" (minimized) " : 
+		wchar_t *wsShowState        = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MINIMIZE) ? L" (minimized) " :
 			(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MAXIMIZE) ? L" (maximized) " : L" ";
-		u16 *wsChild            = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD) ? L"child" : L"parent";
-		u16 *wsVisible          = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_VISIBLE) ? L", visible" : L", hidden";
-		u16 *exAppWindow        = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_APPWINDOW) ? L", appwindow" : L"";
-		u16 *exNoActivate       = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_NOACTIVATE) ? L", noactivate" : L"";
-		u16 *exToolWindow       = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) ? L", toolwindow" : L"";
-		u16 *exTopMost          = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) ? L", topmost" : L"";
-		u16 *wsDisabled         = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_DISABLED) ? L", disabled" : L", enabled";
-		u16 *wsPopup            = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_POPUP) ? L", popup" : L"";
-		u16 *wsOverlapped       = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_OVERLAPPED) ? L", tiled/overlapped" : L"";
-		u16 *wsDlgFrame         = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_DLGFRAME) ? L", dlgframe" : L"";
-		u16 *exDlgModalFrame    = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_DLGMODALFRAME) ? L", dlgmodalframe" : L"";
-		u16 *exLayered          = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED) ? L", layered" : L"";
-		u16 *exComposited       = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_COMPOSITED) ? L", composited" : L"";
-		u16 *exPaletteWindow    = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_PALETTEWINDOW) ? L", palettewindow" : L"";
-		u16 *exOverlappedWindow = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_OVERLAPPEDWINDOW) ? L", exoverlappedwindow" : L"";
+		wchar_t *wsChild            = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD) ? L"child" : L"parent";
+		wchar_t *wsVisible          = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_VISIBLE) ? L", visible" : L", hidden";
+		wchar_t *exAppWindow        = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_APPWINDOW) ? L", appwindow" : L"";
+		wchar_t *exNoActivate       = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_NOACTIVATE) ? L", noactivate" : L"";
+		wchar_t *exToolWindow       = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) ? L", toolwindow" : L"";
+		wchar_t *exTopMost          = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) ? L", topmost" : L"";
+		wchar_t *wsDisabled         = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_DISABLED) ? L", disabled" : L", enabled";
+		wchar_t *wsPopup            = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_POPUP) ? L", popup" : L"";
+		wchar_t *wsOverlapped       = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_OVERLAPPED) ? L", tiled/overlapped" : L"";
+		wchar_t *wsDlgFrame         = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_DLGFRAME) ? L", dlgframe" : L"";
+		wchar_t *exDlgModalFrame    = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_DLGMODALFRAME) ? L", dlgmodalframe" : L"";
+		wchar_t *exLayered          = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED) ? L", layered" : L"";
+		wchar_t *exComposited       = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_COMPOSITED) ? L", composited" : L"";
+		wchar_t *exPaletteWindow    = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_PALETTEWINDOW) ? L", palettewindow" : L"";
+		wchar_t *exOverlappedWindow = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_OVERLAPPEDWINDOW) ? L", exoverlappedwindow" : L"";
 		Print(L"%p { %s, %s }%s\"%.32s\"", hwnd, filename.text, class.text, wsShowState, title.text);
 		Print(L" (%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s)\n",
 			wsChild, wsVisible, exAppWindow, exNoActivate, exToolWindow, exTopMost,
@@ -321,15 +323,15 @@ static void PrintWindowX(handle hwnd) // PrintWindow already taken
 static string GetAppName(string *filepath)
 {
 	// Query version info for pretty application name. See cmdtab's own res/cmdtab.rc file for an idea of the data that is queried.
-	
+
 	string name = {0};
 
 	struct {
 		void *data;
-		u32 size;
+		ulong32 size;
 	} versionInfo;
 
-	if (!(versionInfo.size = GetFileVersionInfoSizeW(filepath->text, null))) {
+	if (!(versionInfo.size = GetFileVersionInfoSizeW(filepath->text, NULL))) {
 		goto abort;
 	}
 	if (!(versionInfo.data = malloc(versionInfo.size))) {
@@ -340,19 +342,20 @@ static string GetAppName(string *filepath)
 	}
 
 	struct {
-		u16 language;
-		u16 codepage;
+		wchar_t language;
+		wchar_t codepage;
 	} *translation;
-	
-	if (!VerQueryValueW(versionInfo.data, L"\\VarFileInfo\\Translation", (void *)&translation, null)) {
+
+	uint32_t unused;
+	if (!VerQueryValueW(versionInfo.data, L"\\VarFileInfo\\Translation", (void *)&translation, &unused)) {
 		goto free;
 	}
 
-	u16 key[MAX_PATH];
+	wchar_t key[MAX_PATH];
 
 	struct {
-		u16 *text;
-		u32 length;
+		wchar_t *text;
+		uint32_t length;
 	} value;
 
 	// Prefer the pretty application name in the "FileDescription" field
@@ -382,11 +385,11 @@ static string GetAppName(string *filepath)
 		return name;
 }
 
-static handle GetAppIcon(string *filepath)
+static HICON GetAppIcon(string *filepath)
 {
 	//IsImmersiveProcess();
 	//GetApplicationUserModelId(); // appmodel.h
-	
+
 	// From Raymond Chen: https://stackoverflow.com/a/12429114/659310
 	//
 	// Requires the following:
@@ -406,19 +409,19 @@ static handle GetAppIcon(string *filepath)
 	// NOTE: Can also check out SHDefExtractIcon
 	//       https://devblogs.microsoft.com/oldnewthing/20140501-00/?p=1103
 
-	//if (FAILED(CoInitialize(null))) {
-	//	return null;
+	//if (FAILED(CoInitialize(NULL))) {
+	//	return NULL;
 	//}
-	IImageList *list = {0};
+	IImageList *list = NULL;
 	if (FAILED(SHGetImageList(SHIL_JUMBO, &IID_IImageList, (void **)&list))) {
-		return null;
+		return NULL;
 	}
 	SHFILEINFOW info = {0};
 	if (!SHGetFileInfoW(filepath->text, 0, &info, sizeof info, SHGFI_SYSICONINDEX)) { // 2nd arg: -1, 0 or FILE_ATTRIBUTE_NORMAL
 		Debug(L"suspicious SHGetFileInfoW return"); // SHGetFileInfoW has special return with SHGFI_SYSICONINDEX flag, which I think should never fail (docs unclear?)
-		return null;
+		return NULL;
 	}
-	HICON icon = {0};
+	HICON icon = NULL;
 	IImageList_GetIcon(list, info.iIcon, ILD_TRANSPARENT, &icon);
 	IImageList_Release(list);
 	return icon; // Caller is responsible for calling DestroyIcon
@@ -426,20 +429,20 @@ static handle GetAppIcon(string *filepath)
 
 static bool IsDarkModeEnabled(void)
 {
-	u32 value;
-	u32 size = sizeof value;
-	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUsesLightTheme", RRF_RT_DWORD, null, &value, &size)) {
-		return !value; // 'value' is true for light mode
+	ulong32 value;
+	ulong32 size = sizeof value;
+	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUsesLightTheme", RRF_RT_DWORD, NULL, &value, &size)) {
+		return !value; // 'value' is TRUE for light mode
 	} else {
 		return true; // Default to dark mode
 	}
 }
 
-static u32 GetAccentColor(void)
+static ulong32 GetAccentColor(void)
 {
-	u32 value;
-	u32 size = sizeof value;
-	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM\\", L"AccentColor", RRF_RT_DWORD, null, &value, &size)) {
+	ulong32 value;
+	ulong32 size = sizeof value;
+	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM\\", L"AccentColor", RRF_RT_DWORD, NULL, &value, &size)) {
 		return value;
 	} else {
 		//       AABBGGRR
@@ -447,42 +450,41 @@ static u32 GetAccentColor(void)
 	}
 }
 
-static void SetAutorun(bool enabled, u16 *keyname, u16 *args)
+static void SetAutorun(bool enabled, wchar_t *keyname, wchar_t *args)
 {
 	string filepath;
 	string target;
-	filepath.length = GetModuleFileNameW(null, filepath.text, countof(filepath.text)-1); // Get filepath of current module
+	filepath.length = GetModuleFileNameW(NULL, filepath.text, countof(filepath.text)-1); // Get filepath of current module
 	StringCchPrintfW(target.text, countof(target.text)-1, L"\"%s\" %s", filepath.text, args);
 	target.length = wcslen(target.text);
-	handle regkey;
-	i32 success; // BUG Not checking 'success' below
+	HKEY regkey;
 	if (enabled) {
-		success = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, null, 0, KEY_SET_VALUE, null, &regkey, null);
-		success = RegSetValueExW(regkey, keyname, 0, REG_SZ, target.text, target.length * sizeof *target.text);
-		success = RegCloseKey(regkey);
+		RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, NULL, 0, KEY_SET_VALUE, NULL, &regkey, NULL);
+		RegSetValueExW(regkey, keyname, 0, REG_SZ, (BYTE *)target.text, (ulong32)(target.length * sizeof *target.text));
+		RegCloseKey(regkey);
 	} else {
-		success = RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_ALL_ACCESS, &regkey);
-		success = RegDeleteValueW(regkey, keyname);
-		success = RegCloseKey(regkey);
+		RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_ALL_ACCESS, &regkey);
+		RegDeleteValueW(regkey, keyname);
+		RegCloseKey(regkey);
 	}
 }
 
-static bool IsKeyDown(u32 key)
+static bool IsKeyDown(int32_t key)
 {
-	return (bool)(GetAsyncKeyState(key) & 0x8000);
+	return GetAsyncKeyState(key) & 0x8000;
 }
 
-static void ReportWindowHandle(handle hwnd, handle target)
+static void ReportWindowHandle(HWND hwnd, HWND target)
 {
 	// Tell user the executable name and class so they can add it to the blacklist
 	string class = GetWindowClass(target);
 	string path = GetExePath(target);
 	string name = StringFileName(&path, false);
 
-	u16 buffer[2048];
+	wchar_t buffer[2048];
 	StringCchPrintfW(buffer, countof(buffer)-1, L"Add to blacklist?\n\nName:\t%s\nClass:\t%s\n\nPress Ctrl+C to copy this message.\n\nNote: Blacklist not working yet, it does nothing, TODO!", name.text, class.text);
 	SetForegroundWindow(hwnd);
-	return MessageBoxW(hwnd, buffer, L"cmdtab", MB_OK | MB_ICONASTERISK | MB_TASKMODAL) == IDYES;
+	MessageBoxW(hwnd, buffer, L"cmdtab", MB_OK | MB_ICONASTERISK | MB_TASKMODAL);
 }
 
 static void ReceiveLastInputEvent(void)
@@ -503,7 +505,7 @@ static void ReceiveLastInputEvent(void)
 	SendInput(1, &(INPUT){.type = INPUT_KEYBOARD}, sizeof(INPUT));
 }
 
-static void ShowWindowX(handle hwnd) // ShowWindow already taken
+static void ShowWindowX(HWND hwnd) // ShowWindow already taken
 {
 	if (GetForegroundWindow() != hwnd) {
 		if (IsIconic(hwnd)) {
@@ -516,18 +518,18 @@ static void ShowWindowX(handle hwnd) // ShowWindow already taken
 			PrintWindowX(hwnd);
 		} else {
 			PrintWindowX(hwnd);
-			Error(null/*Switcher*/, L"ERROR couldn't switch to %s", GetWindowTitle(hwnd));
-			//CancelSwitcher(false);
+			Error(NULL/*Switcher*/, L"ERROR couldn't switch to %s", GetWindowTitle(hwnd));
+			//CancelSwitcher(FALSE);
 		}
 	} else {
 		Print(L"switch to: already foreground\n");
 	}
 }
 
-static void PreviewWindow(handle hwnd)
+static void PreviewWindow(HWND hwnd)
 {
-	//typedef HRESULT (__stdcall *DwmpActivateLivePreview)(bool peekOn, handle hPeekWindow, handle hTopmostWindow, u32 peekType1or3, i64 newForWin10);
-	//DwmpActivateLivePreview(true, hwnd, gui, 3, 0);
+	//typedef HRESULT (__stdcall *DwmpActivateLivePreview)(BOOL peekOn, handle hPeekWindow, handle hTopmostWindow, unsigned peekType1or3, i64 newForWin10);
+	//DwmpActivateLivePreview(TRUE, hwnd, gui, 3, 0);
 
 	// TODO "perviewing" not implemented yet. Have to find a way to show windows without changing their Z-Order (i.e. "previewing" them)
 
@@ -535,29 +537,29 @@ static void PreviewWindow(handle hwnd)
 	ShowWindowX(hwnd);
 }
 
-static void HideWindow(handle hwnd)
+static void HideWindow(HWND hwnd)
 {
 	// WARNING Can't use this because we filter out hidden windows
 	ShowWindow(hwnd, SW_HIDE); // Yes, call ShowWindow to hide window...
 }
 
-static void MinimizeWindow(handle hwnd)
+static void MinimizeWindow(HWND hwnd)
 {
 	PostMessageW(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
 }
 
-static void CloseWindowX(handle hwnd) // CloseWindow already taken
+static void CloseWindowX(HWND hwnd) // CloseWindow already taken
 {
 	Print(L"close window ");
 	PrintWindowX(hwnd);
 	PostMessageW(hwnd, WM_CLOSE, 0, 0);
 }
 
-static void TerminateWindowProcess(handle hwnd)
+static void TerminateWindowProcess(HWND hwnd)
 {
-	u32 pid;
+	ulong32 pid;
 	GetWindowThreadProcessId(hwnd, &pid);
-	handle process = OpenProcess(PROCESS_TERMINATE, false, pid); // NOTE See GetProcessHandleFromHwnd
+	HANDLE process = OpenProcess(PROCESS_TERMINATE, FALSE, pid); // NOTE See GetProcessHandleFromHwnd
 	if (!process || process == INVALID_HANDLE_VALUE || !TerminateProcess(process, 0)) {
 		Print(L"ERROR couldn't terminate process with pid: %u\n", pid);
 	}
@@ -570,8 +572,8 @@ static void TerminateWindowProcess(handle hwnd)
 
 struct config {
 	// Hotkeys
-	struct { u32 mod, key; } hotkeyForApps;
-	struct { u32 mod, key; } hotkeyForWindows;
+	struct { uint32_t mod, key; } hotkeyForApps;
+	struct { uint32_t mod, key; } hotkeyForWindows;
 	// Behavior
 	bool switchApps;
 	bool switchWindows;
@@ -583,39 +585,39 @@ struct config {
 	bool restoreOnCancel;
 	// Appearance
 	bool darkmode;
-	u32 switcherHeight;
-	u32 switcherHorzMargin;
-	u32 switcherVertMargin;
-	u32 iconWidth;
-	u32 iconHorzPadding;
+	uint32_t switcherHeight;
+	uint32_t switcherHorzMargin;
+	uint32_t switcherVertMargin;
+	uint32_t iconWidth;
+	uint32_t iconHorzPadding;
 	// Blacklist
 	struct identifier {
-		u16 *filename;          // Filename without file extension, ex. "explorer". Can be null.
-		u16 *windowClass;       // Window class name. Can be null.
+		wchar_t *filename;          // Filename without file extension, ex. "explorer". Can be NULL.
+		wchar_t *windowClass;       // Window class name. Can be NULL.
 	} blacklist[32];
 };
 
 struct app {
 	string path;                // Full path of app executable.
 	string name;                // Product description/name, or filename without extension as fallback.
-	handle icon;                // Big app icon.
-	handle windows[64];         // App windows that can be switched to.
-	size windowsCount;          // Number of elements in 'windows' array.
+	HICON icon;                 // Big app icon.
+	HWND windows[64];           // App windows that can be switched to.
+	ssize windowsCount;         // Number of elements in 'windows' array.
 };
 
 static struct app Apps[128];    // Apps that are displayed in switcher.
-static size AppsCount;          // Number of elements in 'Apps' array.
+static ssize AppsCount;         // Number of elements in 'Apps' array.
 static struct app *SelectedApp; // Pointer to one of the elements in 'Apps' array. The app for the 'SelectedWindow'.
-static handle *SelectedWindow;  // Currently selected window in switcher. Non-NULL indicates switcher is active.
-static handle RestorableWindow; // Whatever window was foreground when switcher was activated. Does not need to be in filtered 'Apps' array.
-static handle History[128];     // Window activation history from Windows events. Deduplicated, so prior activations are moved to the front.
-static size HistoryCount;       // Number of elements in 'History' array.
-static handle Switcher;         // Handle for main window (i.e. switcher).
-static handle DrawingContext;   // Drawing context for double-buffered drawing of main window.
-static handle DrawingBitmap;    // Off-screen bitmap used for double-buffered drawing of main window.
+static HWND *SelectedWindow;    // Currently selected window in switcher. Non-NULL indicates switcher is active.
+static HWND RestorableWindow;   // Whatever window was foreground when switcher was activated. Does not need to be in filtered 'Apps' array.
+static HWND History[128];       // Window activation history from Windows events. Deduplicated, so prior activations are moved to the front.
+static ssize HistoryCount;      // Number of elements in 'History' array.
+static HWND Switcher;           // Handle for main window (i.e. switcher).
+static HDC DrawingContext;      // Drawing context for double-buffered drawing of main window.
+static HBITMAP DrawingBitmap;   // Off-screen bitmap used for double-buffered drawing of main window.
 static RECT DrawingRect;        // Size of the off-screen bitmap.
-static u16 Keyboard[16];        // 256 bits to track key repeat for low-level keyboard hook.
-static i32 MouseX, MouseY;      // Mouse position, for highlighting and clicking app icons.
+static wchar_t Keyboard[16];    // 256 bits to track key repeat for low-level keyboard hook.
+static int32_t MouseX, MouseY;  // Mouse position, for highlighting and clicking app icons.
 
 static struct config Config = { // cmdtab settings
 	// Hotkeys
@@ -639,7 +641,7 @@ static struct config Config = { // cmdtab settings
 	.iconHorzPadding         =   8,
 	// Blacklist
 	.blacklist = {
-		{ null,                       L"ApplicationFrameWindow" },
+		{ NULL,                       L"ApplicationFrameWindow" },
 		{ L"SearchHost",              L"Windows.UI.Core.CoreWindow" },
 		{ L"StartMenuExperienceHost", L"Windows.UI.Core.CoreWindow" },
 	},
@@ -660,21 +662,21 @@ static void InitConfig(void)
 
 static void PrintApps(void)
 {
-	int windowsCount = 0;
-	for (int i = 0; i < AppsCount; i++) {
-		Print(L"%i ", i);
+	ssize windowsCount = 0;
+	for (ssize i = 0; i < AppsCount; i++) {
+		Print(L"%zi ", i);
 		struct app *app = &Apps[i];
 		PrintWindowX(app->windows[0]);
 		windowsCount += app->windowsCount;
-		for (int j = 1; j < app->windowsCount; j++) {
-			Print(L"  %i ", j);
+		for (ssize j = 1; j < app->windowsCount; j++) {
+			Print(L"  %zi ", j);
 			PrintWindowX(app->windows[j]);
 		}
 	}
-	Print(L"%i apps %i windows, %i history:\n", AppsCount, windowsCount, HistoryCount);
+	Print(L"%zi apps %zi windows, %zi history:\n", AppsCount, windowsCount, HistoryCount);
 	// And print History
-	for (int i = 0; i < HistoryCount; i++) {
-		Print(L"%i ", i);
+	for (ssize i = 0; i < HistoryCount; i++) {
+		Print(L"%zi ", i);
 		PrintWindowX(History[i]);
 	}
 }
@@ -685,10 +687,10 @@ static bool WindowIsBlacklisted(string *filename, string *windowClass)
 
 	// Iterate blacklist. I allow three kinds of entries in the black list:
 	// 1) {name,class} both name and class are specified and both must match
-	// 2) {name,null}  only name is specified and must match
-	// 3) {null,class} only class is specified and must match
-	// 4) {null,null}  terminates array
-	for (size i = 0; i < countof(Config.blacklist); i++) {
+	// 2) {name,NULL}  only name is specified and must match
+	// 3) {NULL,class} only class is specified and must match
+	// 4) {NULL,NULL}  terminates array
+	for (ssize i = 0; i < countof(Config.blacklist); i++) {
 		struct identifier ignored = Config.blacklist[i];
 		if (ignored.filename && ignored.windowClass) {
 			if (wcseq(ignored.filename, filename->text) &&
@@ -706,10 +708,10 @@ static bool WindowIsBlacklisted(string *filename, string *windowClass)
 	return false;
 }
 
-static void AddToHistory(handle hwnd) {
+static void AddToHistory(HWND hwnd) {
 	// Get hosted window in case of UWP host
 	hwnd = GetCoreWindow(hwnd);
-	// 
+	//
 	if (History[0] == hwnd) {
 		Print(L"(already first in history) ");
 		Print(L"activate window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
@@ -717,7 +719,7 @@ static void AddToHistory(handle hwnd) {
 		return;
 	}
 	// Potentially find 'hwnd' in activation list and shift other hwnds down to position of 'hwnd' and then put 'hwnd' first
-	for (int i = 1; i < HistoryCount; i++) {
+	for (ssize i = 1; i < HistoryCount; i++) {
 		if (History[i] == hwnd) {
 			memmove(&History[1], &History[0], sizeof History[0] * i);
 			History[0] = hwnd;
@@ -762,7 +764,7 @@ static void AddToHistory(handle hwnd) {
 	PrintWindowX(hwnd);
 }
 
-static void AddToSwitcher(handle hwnd)
+static void AddToSwitcher(HWND hwnd)
 {
 	// 1. Get hosted window in case of UWP host
 	hwnd = GetCoreWindow(hwnd);
@@ -788,8 +790,8 @@ static void AddToSwitcher(handle hwnd)
 		return;
 	}
 	// 5. Find existing app with same module filepath
-	struct app *app = null;
-	for (int i = 0; i < AppsCount; i++) {
+	struct app *app = NULL;
+	for (ssize i = 0; i < AppsCount; i++) {
 		if (StringsAreEqual(&filepath, &Apps[i].path)) {
 			app = &Apps[i];
 			break;
@@ -819,14 +821,14 @@ static void AddToSwitcher(handle hwnd)
 	PrintWindowX(hwnd);
 }
 
-static void ActivateWindow(handle hwnd)
+static void ActivateWindow(HWND hwnd)
 {
 	// Find existing app and window
-	struct app *app = null;
-	handle *window = null;
-	for (int i = 0; i < AppsCount; i++) {
+	struct app *app = NULL;
+	HWND *window = NULL;
+	for (ssize i = 0; i < AppsCount; i++) {
 		app = &Apps[i];
-		for (int j = 0; j < app->windowsCount; j++) {
+		for (ssize j = 0; j < app->windowsCount; j++) {
 			if (app->windows[j] == hwnd) {
 				window = &app->windows[j];
 				break;
@@ -850,23 +852,23 @@ static void ActivateWindow(handle hwnd)
 	}
 }
 
-static bool _AddToSwitcher(handle hwnd, i64 lparam)
+static BOOL CALLBACK _AddToSwitcher(HWND hwnd, nint lparam)
 {
 	// EnumWindowsProc used by UpdateApps: Call AddToSwitcher with every top-level window enumerated by EnumWindows
-	(*((int *)lparam))++; // Increment window counter arg
+	(*((int32_t *)lparam))++; // Increment window counter arg
 	AddToSwitcher(hwnd);
-	return true; // Return true to continue EnumWindows
+	return TRUE; // Return TRUE to continue EnumWindows
 }
 
 static void UpdateApps(void)
 {
 	// Rebuild the whole window list and measure how long it takes
-	i64 start = StartMeasuring();
-	int windowsCount = 0;
+	int64_t start = StartMeasuring();
+	int32_t windowsCount = 0;
 	AppsCount = 0;
-	EnumWindows(_AddToSwitcher, &windowsCount); // _AddToSwitcher calls AddToSwitcher with every top-level window enumerated by EnumWindows
+	EnumWindows(_AddToSwitcher, (nint)&windowsCount); // _AddToSwitcher calls AddToSwitcher with every top-level window enumerated by EnumWindows
 	AddToHistory(GetForegroundWindow()); // "Activate" foreground window to record it in window activation history
-	for (int i = HistoryCount-1; i >= 0; i--) {
+	for (ssize i = HistoryCount-1; i >= 0; i--) {
 		ActivateWindow(History[i]);
 	}
 	Log(L"%i windows, %llims elapsed\n", windowsCount, FinishMeasuring(start));
@@ -892,7 +894,7 @@ static void SelectNextWindow(bool applevel, bool reverse, bool wrap)
 		return;
 	}
 	/*dbg*/struct app *oldApp = SelectedApp;
-	/*dbg*/handle *oldWindow = SelectedWindow;
+	/*dbg*/HWND *oldWindow = SelectedWindow;
 	if (applevel) {
 		struct app *firstApp = &Apps[0];
 		struct app  *lastApp = &Apps[AppsCount-1];
@@ -911,8 +913,8 @@ static void SelectNextWindow(bool applevel, bool reverse, bool wrap)
 		}
 		SelectedWindow = &SelectedApp->windows[0];
 	} else {
-		handle *firstWindow = &SelectedApp->windows[0];
-		handle  *lastWindow = &SelectedApp->windows[SelectedApp->windowsCount-1];
+		HWND *firstWindow = &SelectedApp->windows[0];
+		HWND  *lastWindow = &SelectedApp->windows[SelectedApp->windowsCount-1];
 		if (reverse) {
 			if (SelectedWindow > firstWindow) {
 				SelectedWindow--;
@@ -936,27 +938,27 @@ static void SelectNextWindow(bool applevel, bool reverse, bool wrap)
 
 static void ResizeSwitcher(void)
 {
-	u32   iconsWidth = AppsCount * Config.iconWidth;
-	u32 paddingWidth = AppsCount * Config.iconHorzPadding * 2;
-	u32  marginWidth =         2 * Config.switcherHorzMargin;
+	int32_t   iconsWidth = (int32_t)(AppsCount * Config.iconWidth);
+	int32_t paddingWidth = (int32_t)(AppsCount * Config.iconHorzPadding * 2);
+	int32_t  marginWidth =               2 * Config.switcherHorzMargin;
 
-	u32 w = iconsWidth + paddingWidth + marginWidth;
-	u32 h = Config.switcherHeight;
-	u32 x = GetSystemMetrics(SM_CXSCREEN) / 2 - (w / 2);
-	u32 y = GetSystemMetrics(SM_CYSCREEN) / 2 - (h / 2);
+	int32_t w = iconsWidth + paddingWidth + marginWidth;
+	int32_t h = Config.switcherHeight;
+	int32_t x = GetSystemMetrics(SM_CXSCREEN) / 2 - (w / 2);
+	int32_t y = GetSystemMetrics(SM_CYSCREEN) / 2 - (h / 2);
 
-	MoveWindow(Switcher, x, y, w, h, false); // Yes, "MoveWindow" means "ResizeWindow"
+	MoveWindow(Switcher, x, y, w, h, FALSE); // Yes, "MoveWindow" means "ResizeWindow"
 
 	// Resize off-screen double-buffering bitmap
 	RECT resized = {x, y, x+w, y+h};
 	if (!EqualRect(&DrawingRect, &resized)) {
-		handle context = GetDC(Switcher);
+		HDC context = GetDC(Switcher);
 		DeleteObject(DrawingBitmap);
 		DeleteDC(DrawingContext);
 		DrawingRect = resized;
 		DrawingContext = CreateCompatibleDC(context);
 		DrawingBitmap = CreateCompatibleBitmap(context, DrawingRect.right - DrawingRect.left, DrawingRect.bottom - DrawingRect.top);
-		handle oldBitmap = (handle)SelectObject(DrawingContext, DrawingBitmap);
+		HBITMAP oldBitmap = (HBITMAP)SelectObject(DrawingContext, DrawingBitmap);
 		DeleteObject(oldBitmap);
 		ReleaseDC(Switcher, context);
 	}
@@ -981,18 +983,18 @@ static void RedrawSwitcher(void)
 	#define SEL_VERT_OFF 10 // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
 	#define SEL_HORZ_OFF  6 // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
 
-	static HBRUSH windowBackground = {0};
-	static HBRUSH selectionBackground = {0};
-	static HPEN selectionOutline = {0};
+	static HBRUSH windowBackground = NULL;
+	static HBRUSH selectionBackground = NULL;
+	static HPEN selectionOutline = NULL;
 
 	// Init background brushes (static vars)
-	if (windowBackground == null) {
+	if (windowBackground == NULL) {
 		windowBackground = CreateSolidBrush(BACKGROUND);
 	}
-	if (selectionBackground == null) {
+	if (selectionBackground == NULL) {
 		selectionBackground = CreateSolidBrush(HIGHLIGHT_BG);
 	}
-	//if (selection_outline == null) {
+	//if (selection_outline == NULL) {
 	selectionOutline = CreatePen(PS_SOLID, SEL_OUTLINE, (GetAccentColor() & 0x00FFFFFF)); //HIGHLIGHT); // TODO Leak?
 	//}
 
@@ -1000,15 +1002,15 @@ static void RedrawSwitcher(void)
 	GetClientRect(Switcher, &rect);
 
 	// Invalidate & draw window background
-	RedrawWindow(Switcher, null, null, RDW_INVALIDATE | RDW_ERASE);
+	RedrawWindow(Switcher, NULL, NULL, RDW_INVALIDATE | RDW_ERASE);
 	FillRect(DrawingContext, &rect, windowBackground);
 
 	// Select pen & brush for RoundRect (used to draw selection rectangle)
-	HPEN oldPen = (HPEN)SelectObject(DrawingContext, selectionOutline);
-	HBRUSH oldBrush = (HBRUSH)SelectObject(DrawingContext, selectionBackground);
+	SelectObject(DrawingContext, selectionOutline);
+	SelectObject(DrawingContext, selectionBackground);
 
 	// Select text font, color & background for DrawTextW (used to draw app name)
-	HFONT oldFont = (HFONT)SelectObject(DrawingContext, GetStockObject(DEFAULT_GUI_FONT));
+	SelectObject(DrawingContext, GetStockObject(DEFAULT_GUI_FONT));
 	SetTextColor(DrawingContext, TEXT_COLOR);
 	SetBkMode(DrawingContext, TRANSPARENT);
 
@@ -1017,23 +1019,23 @@ static void RedrawSwitcher(void)
 	//DeleteObject(oldBrush);
 	//DeleteObject(oldFont);
 
-	for (int i = 0; i < AppsCount; i++) {
+	for (ssize i = 0; i < AppsCount; i++) {
 		struct app *app = &Apps[i];
 
 		// Special-case math for index 0
-		i32  left0 = i == 0 ? ICON_PAD : 0;
-		i32 right0 = i != 0 ? ICON_PAD : 0;
+		int32_t  left0 = i == 0 ? ICON_PAD : 0;
+		int32_t right0 = i != 0 ? ICON_PAD : 0;
 
-		i32  icons = (ICON_PAD + ICON_WIDTH + ICON_PAD) * i;
-		i32   left = HORZ_PAD + left0 + icons + right0;
-		i32    top = VERT_PAD;
-		i32  width = ICON_WIDTH;
-		i32 height = ICON_WIDTH;
-		i32  right = left + width;
-		i32 bottom = top + height;
+		int32_t  icons = (int32_t)((ICON_PAD + ICON_WIDTH + ICON_PAD) * i);
+		int32_t   left = HORZ_PAD + left0 + icons + right0;
+		int32_t    top = VERT_PAD;
+		int32_t  width = ICON_WIDTH;
+		int32_t height = ICON_WIDTH;
+		int32_t  right = left + width;
+		int32_t bottom = top + height;
 
 		//RECT icon_rect = (RECT){left, top, right, bottom};
-		//bool app_is_mouseover = PtInRect(&icon_rect, (POINT){MouseX, MouseY});
+		//BOOL app_is_mouseover = PtInRect(&icon_rect, (POINT){MouseX, MouseY});
 		//print(L"mouse %s\n", app_is_mouseover ? L"over" : L"not over");
 
 		if (app != SelectedApp) {
@@ -1045,12 +1047,12 @@ static void RedrawSwitcher(void)
 			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, selectionBackground, DI_NORMAL);
 
 			// Draw app name
-			u16 *title = app->name.text;
+			wchar_t *title = app->name.text;
 
 			// Measure text width
 			RECT testRect = {0};
 			DrawTextW(DrawingContext, title, -1, &testRect, DT_CALCRECT | DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
-			i32 textWidth = (testRect.right - testRect.left) + 2; // Hmm, measured size seems a teensy bit too small, so +2
+			int32_t textWidth = (testRect.right - testRect.left) + 2; // Hmm, measured size seems a teensy bit too small, so +2
 
 			// DrawTextW uses a destination rect for drawing
 			RECT textRect = {0};
@@ -1058,11 +1060,11 @@ static void RedrawSwitcher(void)
 			textRect.right = right;
 			textRect.bottom = rect.bottom;
 
-			i32 widthDiff = textWidth - (textRect.right - textRect.left);
+			int32_t widthDiff = textWidth - (textRect.right - textRect.left);
 			if (widthDiff > 0) {
 				// textRect is too small for text, grow the rect
-				textRect.left -= (i32)ceil(widthDiff / 2.0);
-				textRect.right += (i32)floor(widthDiff / 2.0);
+				textRect.left -= (int32_t)ceil(widthDiff / 2.0);
+				textRect.right += (int32_t)floor(widthDiff / 2.0);
 			}
 
 			textRect.bottom -= ICON_PAD; // *** this lifts the app text up a little ***
@@ -1105,24 +1107,24 @@ static void CancelSwitcher(bool restore)
 		ShowWindowX(RestorableWindow);
 	}
 	// Reset selection
-	SelectedApp = null;
-	SelectedWindow = null;
-	RestorableWindow = null;
+	SelectedApp = NULL;
+	SelectedWindow = NULL;
+	RestorableWindow = NULL;
 }
 
-//static void CloseWindows(handle hwnd) // Alternative to TerminateWindowProcess
+//static void CloseWindows(HWND hwnd) // Alternative to TerminateWindowProcess
 //{
 //	if (AppsCount <= 0) {
 //		return;
 //	}
-//	struct app *app = null;
-//	handle *window = null;
-//	for (int i = 0; i < AppsCount; i++) {
+//	struct app *app = NULL;
+//	handle *window = NULL;
+//	for (int32_t i = 0; i < AppsCount; i++) {
 //		app = &Apps[i];
-//		for (int j = 0; j < app->windowsCount; j++) {
+//		for (int32_t j = 0; j < app->windowsCount; j++) {
 //			if (app->windows[j] == hwnd) {
 //				Print(L"quit app %s\n", app->name);
-//				for (int k = 0; k < app->windowsCount; k++) {
+//				for (int32_t k = 0; k < app->windowsCount; k++) {
 //					CloseWindowX(app->windows[k]);
 //				}
 //				return;
@@ -1131,12 +1133,8 @@ static void CancelSwitcher(bool restore)
 //	}
 //}
 
-static bool SetKey(u32 key, bool down)
+static bool SetKey(uint32_t key, bool down)
 {
-	#ifndef CHAR_BIT
-	#define CHAR_BIT 8
-	#endif
-
 	bool wasdown = Keyboard[key/CHAR_BIT] & (1 << (key % CHAR_BIT)); // getbit
 	if (down) {
 		Keyboard[key/CHAR_BIT] |= (1 << (key % CHAR_BIT)); // setbit1
@@ -1146,20 +1144,20 @@ static bool SetKey(u32 key, bool down)
 	return wasdown && down; // Return true if this was a key repeat
 }
 
-static i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
+static nint CALLBACK KeyboardHookProcedure(int32_t code, nuint wparam, nint lparam)
 {
 	if (code < 0) { // "If code is less than zero, the hook procedure must pass the message to..." blah blah blah read the docs
-		return CallNextHookEx(null, code, wparam, lparam);
+		return CallNextHookEx(NULL, code, wparam, lparam);
 	}
 
-	KBDLLHOOKSTRUCT *kbd = lparam;
-	u32 keyCode = kbd->vkCode;
-	bool keyDown = !(bool)(kbd->flags & LLKHF_UP);
-	
+	KBDLLHOOKSTRUCT *kbd = (KBDLLHOOKSTRUCT *)lparam;
+	uint32_t keyCode = kbd->vkCode;
+	bool keyDown = !(kbd->flags & LLKHF_UP);
+
 	#ifdef _DEBUG
 	if ((kbd->flags & LLKHF_INJECTED) == LLKHF_INJECTED) {
-		u16 keyName[32] = {0};
-		int length = GetKeyNameTextW(kbd->scanCode << 16, keyName, countof(keyName));
+		wchar_t keyName[32] = {0};
+		int32_t length = GetKeyNameTextW(kbd->scanCode << 16, keyName, countof(keyName));
 		Log(L"skip INJECTED INPUT %s %s\n", keyCode ? keyName : L"", keyCode ? keyDown ? L"down" : L"up" : L"");
 		goto passMessage;
 	}
@@ -1364,7 +1362,7 @@ static i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
 			}
 			// Alt-B - display app name and window class to user, to add in blacklist
 			if (keyBDown) {
-				handle selectedWindow = *SelectedWindow; // CancelSwitcher resets SelectedWindow
+				HWND selectedWindow = *SelectedWindow; // CancelSwitcher resets SelectedWindow
 				CancelSwitcher(false);
 				ReportWindowHandle(Switcher, selectedWindow);
 				goto consumeMessage;
@@ -1402,8 +1400,8 @@ static i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
 			}
 			// Input sink - consume keystrokes when activated
 			if (true) {
-				u16 keyName[32] = {0};
-				int length = GetKeyNameTextW(kbd->scanCode << 16, keyName, countof(keyName));
+				wchar_t keyName[32] = {0};
+				GetKeyNameTextW(kbd->scanCode << 16, keyName, countof(keyName));
 				Print(L"input sink %s %s\n", keyName, keyDown ? L"down" : L"up");
 				goto consumeMessage;
 			}
@@ -1412,7 +1410,7 @@ static i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
 
 	passMessage:
 		//print(L"allow next hook\n");
-		return CallNextHookEx(null, code, wparam, lparam);
+		return CallNextHookEx(NULL, code, wparam, lparam);
 	consumeMessage:
 		// By returning a non-zero value from the hook procedure, the message
 		// is consumed and does not get passed to the target window
@@ -1434,11 +1432,11 @@ static void OnWindowPaint(void)
 	// off-screen buffer to screen ("screen" means the 'hdc' returned by
 	// BeginPaint passed our 'hwnd')
 	PAINTSTRUCT ps = {0};
-	handle context = BeginPaint(Switcher, &ps);
+	HDC context = BeginPaint(Switcher, &ps);
 	if (ps.fErase) {
 	}
 	BitBlt(context, 0, 0, DrawingRect.right - DrawingRect.left, DrawingRect.bottom - DrawingRect.top, DrawingContext, 0, 0, SRCCOPY);
-	//int scale = 1.0;
+	//int32_t scale = 1.0;
 	//SetStretchBltMode(DrawingContext, HALFTONE);
 	//StretchBlt(hdc, 0, 0, gdi_width, gdi_height, DrawingContext, 0, 0, gdi_width * scale, gdi_height * scale, SRCCOPY);
 	EndPaint(Switcher, &ps);
@@ -1464,11 +1462,11 @@ static void OnWindowFocusChange(bool focused)
 		// But for now that's how it is.
 		Print(L"switcher lost focus\n");
 		//return 1; // Nu-uh!
-		//cancel(false); // NOTE See comments in cancel
+		//cancel(FALSE); // NOTE See comments in cancel
 	}
 }
 
-static void OnWindowMouseMove(int x, int y)
+static void OnWindowMouseMove(int32_t x, int32_t y)
 {
 	MouseX = x; // GetMessagePos
 	MouseY = y;
@@ -1490,12 +1488,12 @@ static void OnWindowClose(void)
 	}
 }
 
-static void OnShellWindowActivated(handle hwnd)
+static void OnShellWindowActivated(HWND hwnd)
 {
 	AddToHistory(hwnd);
 }
 
-static i64 WindowProcedure(handle hwnd, u32 message, u64 wparam, i64 lparam)
+static nint CALLBACK WindowProcedure(HWND hwnd, uint32_t message, nuint wparam, nint lparam)
 {
 	switch (message) {
 		case WM_CREATE:
@@ -1527,7 +1525,7 @@ static i64 WindowProcedure(handle hwnd, u32 message, u64 wparam, i64 lparam)
 	return 0;
 }
 
-static void EventHookProcedure(handle hook, u32 event, handle hwnd, i32 objectid, i32 childid, u32 threadid, u32 timestamp)
+static void CALLBACK EventHookProcedure(HWINEVENTHOOK hWinEventHook, ulong32 event, HWND hwnd, long32 objectid, long32 childid, ulong32 threadid, ulong32 timestamp)
 {
 	switch (event) {
 		case EVENT_SYSTEM_FOREGROUND:
@@ -1541,7 +1539,7 @@ static void EventHookProcedure(handle hook, u32 event, handle hwnd, i32 objectid
 	}
 }
 
-static bool HasAutorunLaunchArgument(u16 *args)
+static bool HasAutorunLaunchArgument(wchar_t *args)
 {
 	return !wcscmp(args, L"--autorun");
 }
@@ -1553,23 +1551,24 @@ static void AskAutorun(void)
 	#endif
 }
 
-static bool AlreadyRunning(handle *mutex)
+static bool AlreadyRunning(HANDLE *mutex)
 {
-	*mutex = CreateMutexW(null, true, L"cmdtabMutex");
-	return GetLastError() == ERROR_ALREADY_EXISTS;
+	*mutex = CreateMutexW(NULL, TRUE, L"cmdtabMutex");
+	return !mutex || GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
 static void QuitSecondInstance(void)
 {
-	MessageBoxW(null, L"cmdtab is already running.", L"cmdtab", MB_OK | MB_ICONINFORMATION | MB_TASKMODAL);
+	MessageBoxW(NULL, L"cmdtab is already running.", L"cmdtab", MB_OK | MB_ICONINFORMATION | MB_TASKMODAL);
 	ExitProcess(0);
 }
 
-static int RunCmdTab(handle instance, u16 *args)
+static int32_t RunCmdTab(HINSTANCE instance, wchar_t *args)
 {
-	handle mutex;
+	HANDLE mutex = NULL;
 	//handle mainWindow; // Switcher
-	handle keyboardHook, eventHook1, eventHook2;
+	HHOOK keyboardHook;
+	HWINEVENTHOOK eventHook1, eventHook2;
 
 	if (!HasAutorunLaunchArgument(args)) {
 		AskAutorun();
@@ -1577,9 +1576,11 @@ static int RunCmdTab(handle instance, u16 *args)
 	if (AlreadyRunning(&mutex)) {
 		QuitSecondInstance();
 	}
-	
-	//
-	i32 _ = CoInitialize(null);
+
+	if (FAILED(CoInitialize(NULL))) {
+		ReleaseMutex(mutex);
+		return 1;
+	}
 
 	// Initialize runtime-dependent settings, for example dependent on user's current kbd layout
 	InitConfig();
@@ -1587,11 +1588,11 @@ static int RunCmdTab(handle instance, u16 *args)
 	// Create switcher window
 	WNDCLASSEXW wcex = {0};
 	wcex.cbSize = sizeof wcex;
-	wcex.lpfnWndProc = (WNDPROC)WindowProcedure;
+	wcex.lpfnWndProc = WindowProcedure;
 	wcex.hInstance = instance;
 	wcex.hCursor = LoadCursor(instance, IDC_ARROW);
 	wcex.lpszClassName = L"cmdtabSwitcher";
-	Switcher = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, RegisterClassExW(&wcex), null, 0, 0, 0, 0, 0, null, null, instance, null);
+	Switcher = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, (LPWSTR)((ULONG_PTR)((WORD)(RegisterClassExW(&wcex)))), NULL, 0, 0, 0, 0, 0, NULL, NULL, instance, NULL);
 	// Clear all window styles for very plain window
 	SetWindowLongW(Switcher, GWL_STYLE, 0);
 	// Rounded window corners
@@ -1599,35 +1600,32 @@ static int RunCmdTab(handle instance, u16 *args)
 	DwmSetWindowAttribute(Switcher, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof corners);
 
 	// Install keyboard hook and event hooks for foreground window changes. Raymond Chen: https://devblogs.microsoft.com/oldnewthing/20130930-00/?p=3083
-	keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, (HOOKPROC)KeyboardHookProcedure, null, 0);
-	eventHook1 = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, null, EventHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
-	eventHook2 = SetWinEventHook(EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_UNCLOAKED, null, EventHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
-	
+	keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHookProcedure, NULL, 0);
+	eventHook1 = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, NULL, EventHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
+	eventHook2 = SetWinEventHook(EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_UNCLOAKED, NULL, EventHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
+
 	// Run message loop
 	for (MSG msg; GetMessageW(&msg, Switcher, 0, 0) > 0;) DispatchMessageW(&msg); // Not handling -1 errors. Whatever
-	
+
 	// Uninstall keyboard & event hooks
 	UnhookWindowsHookEx(keyboardHook);
 	UnhookWinEvent(eventHook1);
 	UnhookWinEvent(eventHook2);
 
 	CoUninitialize();
+	ReleaseMutex(mutex);
 
-	if (mutex) {
-		ReleaseMutex(mutex);
-		//CloseHandle(hMutex);
-	}
 	Print(L"cmdtab quit\n");
-	bool hasLeaks = _CrtDumpMemoryLeaks();
+	int32_t hasLeaks = _CrtDumpMemoryLeaks();
 	return hasLeaks;
 }
 
-int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine, _In_ int nShowCmd)
+int32_t WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int32_t nShowCmd)
 {
 	//#ifdef _DEBUG
-	//FILE *conout = null;
+	//FILE *conout = NULL;
 	//AllocConsole();
 	//freopen_s(&conout, "CONOUT$", "w", stdout);
 	//#endif
-	return RunCmdTab(hInstance, lpCmdLine);
+	return RunCmdTab(hInstance, GetCommandLineW());
 }
