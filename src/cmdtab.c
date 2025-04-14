@@ -105,6 +105,11 @@ static bool StringsAreEqual(const string *s1, const string *s2)
 	return true;
 }
 
+//static bool StringEndsWith(string *s1, string *s2)
+//{
+//	return s1->length >= s2->length && !memcmp(s1->text + s1->length - s2->length, s2->text, s2->length);
+//}
+
 static string StringFileName(string *filepath, bool extension)
 {
 	// aka. basename
