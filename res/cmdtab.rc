@@ -13,26 +13,23 @@
 	{
 		BLOCK "VarFileInfo"
 		{
-			VALUE "Translation", 0x409, 1200
+			VALUE "Translation", 0x409, 1252
 		}
 		BLOCK "StringFileInfo"
 		{
-			BLOCK "040904B0"
+			BLOCK "040904E4"
 			{
-				VALUE "Comments",		"N/A"
-				VALUE "CompanyName",		"Stian Gudmundsen HÃ¸iland"
+				VALUE "CompanyName",		"Stian Gudmundsen Høiland"
 				VALUE "FileDescription",	"macOS-style Alt-Tab window switcher alternative"
 				VALUE "FileVersion",		"1.5.1"
 				VALUE "InternalName",		"cmdtab"
-				VALUE "LegalCopyright",		"Copyright (C) 2023 Stian Gudmundsen HÃ¸iland"
-				VALUE "LegalTrademarks",	"N/A"
+				VALUE "LegalCopyright",		"Copyright (C) 2023 Stian Gudmundsen Høiland"
 				VALUE "OriginalFilename",	"cmdtab.exe"
-				VALUE "PrivateBuild";		"N/A"
 				VALUE "ProductName",		"cmdtab"
 				VALUE "ProductVersion",		"1.5.1"
-				VALUE "SpecialBuild",		"N/A"
 			}
 		}
 	}
 
 2 ICON "cmdtab.ico"
+3 24 "cmdtab.manifest"
