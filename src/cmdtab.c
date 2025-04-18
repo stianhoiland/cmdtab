@@ -936,14 +936,20 @@ static void SelectNextWindow(bool applevel, bool reverse, bool wrap)
 
 static void ResizeSwitcher(void)
 {
+	// Use the monitor where the mouse pointer is currently placed (#5)
+	POINT mousePos = { 0 };
+	GetCursorPos(&mousePos);
+	MONITORINFO mi = { .cbSize = sizeof(MONITORINFO) };
+	GetMonitorInfoW(MonitorFromPoint(mousePos, MONITOR_DEFAULTTONEAREST), &mi);
+
 	u32   iconsWidth = AppsCount * Config.iconWidth;
 	u32 paddingWidth = AppsCount * Config.iconHorzPadding * 2;
 	u32  marginWidth =         2 * Config.switcherHorzMargin;
 
 	u32 w = iconsWidth + paddingWidth + marginWidth;
 	u32 h = Config.switcherHeight;
-	u32 x = GetSystemMetrics(SM_CXSCREEN) / 2 - (w / 2);
-	u32 y = GetSystemMetrics(SM_CYSCREEN) / 2 - (h / 2);
+	u32 x = (mi.rcMonitor.right - mi.rcMonitor.left) / 2 - (w / 2);
+	u32 y = (mi.rcMonitor.bottom - mi.rcMonitor.top) / 2 - (h / 2);
 
 	MoveWindow(Switcher, x, y, w, h, false); // Yes, "MoveWindow" means "ResizeWindow"
 
