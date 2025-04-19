@@ -1065,7 +1065,7 @@ static void RedrawSwitcher(void)
 				textRect.right += (i32)floor(widthDiff / 2.0);
 			}
 
-			textRect.bottom -= ICON_PAD; // *** this lifts the app text up a little ***
+			textRect.bottom -= ICON_PAD / 2; // *** this lifts the app text up a little ***
 
 			// If the app name, when centered, extends past window bounds, adjust label position to be inside window bounds
 			if (textRect.right > rect.right) {
