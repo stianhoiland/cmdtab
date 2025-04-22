@@ -948,8 +948,8 @@ static void ResizeSwitcher(void)
 
 	u32 w = iconsWidth + paddingWidth + marginWidth;
 	u32 h = Config.switcherHeight;
-	u32 x = (mi.rcMonitor.right - mi.rcMonitor.left) / 2 - (w / 2);
-	u32 y = (mi.rcMonitor.bottom - mi.rcMonitor.top) / 2 - (h / 2);
+	u32 x = mi.rcMonitor.left + (mi.rcMonitor.right - mi.rcMonitor.left - w) / 2;
+	u32 y = mi.rcMonitor.top + (mi.rcMonitor.bottom - mi.rcMonitor.top - h) / 2;
 
 	MoveWindow(Switcher, x, y, w, h, false); // Yes, "MoveWindow" means "ResizeWindow"
 
