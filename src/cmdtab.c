@@ -25,7 +25,6 @@
 #define NOSCROLL
 #define NOSERVICE
 #define NOSOUND
-#define NOTEXTMETRIC
 #define NOCOMM
 #define NOKANJI
 #define NOHELP
@@ -40,6 +39,7 @@
 #include "dwmapi.h"
 #include "pathcch.h"
 #include "strsafe.h"
+#include <initguid.h>
 #include "commoncontrols.h"
 
 #pragma comment(lib, "user32.lib")
@@ -196,7 +196,7 @@ static string GetWindowClass(handle hwnd)
 	return class;
 }
 
-static bool _GetCoreWindow(handle child, i64 lparam)
+static BOOL CALLBACK _GetCoreWindow(HWND child, LPARAM lparam)
 {
 	// EnumChildProc used by GetCoreWindow
 	// Set inout 'lparam' to hosted core window
@@ -214,7 +214,7 @@ static handle GetCoreWindow(handle hwnd)
 	string class = GetWindowClass(hwnd);
 	if (StringsAreEqual(&class, &UWPAppHostClass)) {
 		handle hwnd2 = hwnd;
-		EnumChildWindows(hwnd, _GetCoreWindow, &hwnd2); // _GetCoreWindow sets 'hwnd2' to hosted core window, if any
+		EnumChildWindows(hwnd, _GetCoreWindow, (LPARAM)&hwnd2); // _GetCoreWindow sets 'hwnd2' to hosted core window, if any
 		return hwnd2;
 	} else {
 		return hwnd;
@@ -254,14 +254,14 @@ static bool IsAltTabWindow(handle hwnd)
 static string GetExePath(handle hwnd)
 {
 	string path = {0};
-	u32 pid;
+	ULONG pid;
 	GetWindowThreadProcessId(hwnd, &pid);
 	handle process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
 	if (!process || process == INVALID_HANDLE_VALUE) {
 		Print(L"WARNING couldn't open process with pid: %u\n", pid);
 		return path;
 	}
-	u32 length = countof(path.text);
+	ULONG length = countof(path.text);
 	path.ok = QueryFullProcessImageNameW(process, 0, path.text, &length);
 	CloseHandle(process);
 	if (!path.ok) {
@@ -426,8 +426,8 @@ static handle GetAppIcon(string *filepath)
 
 static bool IsDarkModeEnabled(void)
 {
-	u32 value;
-	u32 size = sizeof value;
+	ULONG value;
+	ULONG size = sizeof value;
 	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUsesLightTheme", RRF_RT_DWORD, null, &value, &size)) {
 		return !value; // 'value' is true for light mode
 	} else {
@@ -437,8 +437,8 @@ static bool IsDarkModeEnabled(void)
 
 static u32 GetAccentColor(void)
 {
-	u32 value;
-	u32 size = sizeof value;
+	ULONG value;
+	ULONG size = sizeof value;
 	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM\\", L"AccentColor", RRF_RT_DWORD, null, &value, &size)) {
 		return value;
 	} else {
@@ -454,11 +454,11 @@ static void SetAutorun(bool enabled, u16 *keyname, u16 *args)
 	filepath.length = GetModuleFileNameW(null, filepath.text, countof(filepath.text)-1); // Get filepath of current module
 	StringCchPrintfW(target.text, countof(target.text)-1, L"\"%s\" %s", filepath.text, args);
 	target.length = wcslen(target.text);
-	handle regkey;
+	HKEY regkey;
 	i32 success; // BUG Not checking 'success' below
 	if (enabled) {
 		success = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, null, 0, KEY_SET_VALUE, null, &regkey, null);
-		success = RegSetValueExW(regkey, keyname, 0, REG_SZ, target.text, target.length * sizeof *target.text);
+		success = RegSetValueExW(regkey, keyname, 0, REG_SZ, (UCHAR *)target.text, target.length * sizeof *target.text); // TODO Oof, that's a nasty cast
 		success = RegCloseKey(regkey);
 	} else {
 		success = RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_ALL_ACCESS, &regkey);
@@ -472,7 +472,7 @@ static bool IsKeyDown(u32 key)
 	return (bool)(GetAsyncKeyState(key) & 0x8000);
 }
 
-static void ReportWindowHandle(handle hwnd, handle target)
+static int ReportWindowHandle(handle hwnd, handle target)
 {
 	// Tell user the executable name and class so they can add it to the blacklist
 	string class = GetWindowClass(target);
@@ -555,7 +555,7 @@ static void CloseWindowX(handle hwnd) // CloseWindow already taken
 
 static void TerminateWindowProcess(handle hwnd)
 {
-	u32 pid;
+	ULONG pid;
 	GetWindowThreadProcessId(hwnd, &pid);
 	handle process = OpenProcess(PROCESS_TERMINATE, false, pid); // NOTE See GetProcessHandleFromHwnd
 	if (!process || process == INVALID_HANDLE_VALUE || !TerminateProcess(process, 0)) {
@@ -850,7 +850,7 @@ static void ActivateWindow(handle hwnd)
 	}
 }
 
-static bool _AddToSwitcher(handle hwnd, i64 lparam)
+static BOOL CALLBACK _AddToSwitcher(HWND hwnd, LPARAM lparam)
 {
 	// EnumWindowsProc used by UpdateApps: Call AddToSwitcher with every top-level window enumerated by EnumWindows
 	(*((int *)lparam))++; // Increment window counter arg
@@ -864,7 +864,7 @@ static void UpdateApps(void)
 	i64 start = StartMeasuring();
 	int windowsCount = 0;
 	AppsCount = 0;
-	EnumWindows(_AddToSwitcher, &windowsCount); // _AddToSwitcher calls AddToSwitcher with every top-level window enumerated by EnumWindows
+	EnumWindows(_AddToSwitcher, (LPARAM)&windowsCount); // _AddToSwitcher calls AddToSwitcher with every top-level window enumerated by EnumWindows
 	AddToHistory(GetForegroundWindow()); // "Activate" foreground window to record it in window activation history
 	for (int i = HistoryCount-1; i >= 0; i--) {
 		ActivateWindow(History[i]);
@@ -1152,13 +1152,13 @@ static bool SetKey(u32 key, bool down)
 	return wasdown && down; // Return true if this was a key repeat
 }
 
-static i64 KeyboardHookProcedure(int code, u64 wparam, i64 lparam)
+static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lparam)
 {
 	if (code < 0) { // "If code is less than zero, the hook procedure must pass the message to..." blah blah blah read the docs
 		return CallNextHookEx(null, code, wparam, lparam);
 	}
 
-	KBDLLHOOKSTRUCT *kbd = lparam;
+	KBDLLHOOKSTRUCT *kbd = (KBDLLHOOKSTRUCT *)lparam;
 	u32 keyCode = kbd->vkCode;
 	bool keyDown = !(bool)(kbd->flags & LLKHF_UP);
 	
@@ -1533,7 +1533,7 @@ static i64 WindowProcedure(handle hwnd, u32 message, u64 wparam, i64 lparam)
 	return 0;
 }
 
-static void EventHookProcedure(handle hook, u32 event, handle hwnd, i32 objectid, i32 childid, u32 threadid, u32 timestamp)
+static VOID CALLBACK EventHookProcedure(HWINEVENTHOOK hook, ULONG event, HWND hwnd, LONG objectid, LONG childid, ULONG threadid, ULONG timestamp)
 {
 	switch (event) {
 		case EVENT_SYSTEM_FOREGROUND:
@@ -1597,7 +1597,7 @@ static int RunCmdTab(handle instance, u16 *args)
 	wcex.hInstance = instance;
 	wcex.hCursor = LoadCursor(instance, IDC_ARROW);
 	wcex.lpszClassName = L"cmdtabSwitcher";
-	Switcher = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, RegisterClassExW(&wcex), null, 0, 0, 0, 0, 0, null, null, instance, null);
+	Switcher = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, MAKEINTATOM(RegisterClassExW(&wcex)), null, 0, 0, 0, 0, 0, null, null, instance, null);
 	// Clear all window styles for very plain window
 	SetWindowLongW(Switcher, GWL_STYLE, 0);
 	// Rounded window corners
@@ -1636,4 +1636,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 	//freopen_s(&conout, "CONOUT$", "w", stdout);
 	//#endif
 	return RunCmdTab(hInstance, lpCmdLine);
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
+{
+	return RunCmdTab(hInstance, GetCommandLineW());
 }
