@@ -1571,6 +1571,9 @@ static int RunCmdTab(handle instance, u16 *args)
 	//handle mainWindow; // Switcher
 	handle keyboardHook, eventHook1, eventHook2;
 
+	// Avoid blurry window content (#10)
+	SetProcessDPIAware();
+
 	if (!HasAutorunLaunchArgument(args)) {
 		AskAutorun();
 	}
