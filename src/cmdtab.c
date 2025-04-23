@@ -1053,16 +1053,19 @@ static void RedrawSwitcher(void)
 			// Draw app name
 			u16 *title = app->name.text;
 
-			// Measure text width
+			// Measure text width and height
 			RECT testRect = {0};
-			DrawTextW(DrawingContext, title, -1, &testRect, DT_CALCRECT | DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
+			DrawTextW(DrawingContext, title, -1, &testRect, DT_CALCRECT | DT_SINGLELINE | DT_CENTER | DT_VCENTER);
 			i32 textWidth = (testRect.right - testRect.left) + 2; // Hmm, measured size seems a teensy bit too small, so +2
+			i32 textHeight = (testRect.bottom - testRect.top);
 
 			// DrawTextW uses a destination rect for drawing
-			RECT textRect = {0};
-			textRect.left = left;
-			textRect.right = right;
-			textRect.bottom = rect.bottom;
+			RECT textRect = {
+				.top = bottom + VERT_PAD / 2 - textHeight,
+				.left = left,
+				.right = right,
+				.bottom = bottom + VERT_PAD / 2 + textHeight
+			};
 
 			i32 widthDiff = textWidth - (textRect.right - textRect.left);
 			if (widthDiff > 0) {
@@ -1070,8 +1073,6 @@ static void RedrawSwitcher(void)
 				textRect.left -= (i32)ceil(widthDiff / 2.0);
 				textRect.right += (i32)floor(widthDiff / 2.0);
 			}
-
-			textRect.bottom -= ICON_PAD; // *** this lifts the app text up a little ***
 
 			// If the app name, when centered, extends past window bounds, adjust label position to be inside window bounds
 			if (textRect.right > rect.right) {
@@ -1084,7 +1085,7 @@ static void RedrawSwitcher(void)
 			}
 
 			///* dbg */ FillRect(DrawingContext, &textRect, CreateSolidBrush(RGB(255, 0, 0))); // Check the size of the text box
-			DrawTextW(DrawingContext, title, -1, &textRect, DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
+			DrawTextW(DrawingContext, title, -1, &textRect, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
 		}
 	}
 }
@@ -1576,6 +1577,9 @@ static int RunCmdTab(handle instance, u16 *args)
 	handle mutex;
 	//handle mainWindow; // Switcher
 	handle keyboardHook, eventHook1, eventHook2;
+
+	// Avoid blurry window content (#10)
+	SetProcessDPIAware();
 
 	if (!HasAutorunLaunchArgument(args)) {
 		AskAutorun();
