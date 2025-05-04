@@ -15,7 +15,6 @@
 #define OEMRESOURCE
 #define NOATOM
 #define NOCLIPBOARD
-#define NOCOLOR
 #define NOKERNEL
 #define NONLS
 #define NOMEMMGR
@@ -426,13 +425,9 @@ static handle GetAppIcon(string *filepath)
 
 static bool IsDarkModeEnabled(void)
 {
-	ULONG value;
-	ULONG size = sizeof value;
-	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUsesLightTheme", RRF_RT_DWORD, null, &value, &size)) {
-		return !value; // 'value' is true for light mode
-	} else {
-		return true; // Default to dark mode
-	}
+	DWORD size = sizeof(DWORD), isLight = 0; // default to dark mode
+	RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_DWORD, NULL, &isLight, &size);
+	return !isLight;
 }
 
 static u32 GetAccentColor(void)
@@ -616,6 +611,7 @@ static handle DrawingBitmap;    // Off-screen bitmap used for double-buffered dr
 static RECT DrawingRect;        // Size of the off-screen bitmap.
 static u16 Keyboard[16];        // 256 bits to track key repeat for low-level keyboard hook.
 static i32 MouseX, MouseY;      // Mouse position, for highlighting and clicking app icons.
+static CRITICAL_SECTION lock;   // Used to synchronize the drawing and the copying of the off-screen bitmap.
 
 static struct config Config = { // cmdtab settings
 	// Hotkeys
@@ -987,20 +983,17 @@ static void RedrawSwitcher(void)
 	#define SEL_VERT_OFF 10 // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
 	#define SEL_HORZ_OFF  6 // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
 
-	static HBRUSH windowBackground = {0};
-	static HBRUSH selectionBackground = {0};
-	static HPEN selectionOutline = {0};
-
-	// Init background brushes (static vars)
-	if (windowBackground == null) {
+	HBRUSH windowBackground;
+	HBRUSH selectionBackground;
+	if (Config.darkmode) {
 		windowBackground = CreateSolidBrush(BACKGROUND);
-	}
-	if (selectionBackground == null) {
 		selectionBackground = CreateSolidBrush(HIGHLIGHT_BG);
 	}
-	//if (selection_outline == null) {
-	selectionOutline = CreatePen(PS_SOLID, SEL_OUTLINE, (GetAccentColor() & 0x00FFFFFF)); //HIGHLIGHT); // TODO Leak?
-	//}
+	else {
+		windowBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+		selectionBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+	}
+	HPEN selectionOutline = CreatePen(PS_SOLID, SEL_OUTLINE, (GetAccentColor() & 0x00FFFFFF)); //HIGHLIGHT); // TODO Leak?
 
 	RECT rect = {0};
 	GetClientRect(Switcher, &rect);
@@ -1015,13 +1008,8 @@ static void RedrawSwitcher(void)
 
 	// Select text font, color & background for DrawTextW (used to draw app name)
 	HFONT oldFont = (HFONT)SelectObject(DrawingContext, GetStockObject(DEFAULT_GUI_FONT));
-	SetTextColor(DrawingContext, TEXT_COLOR);
+	SetTextColor(DrawingContext, Config.darkmode ? TEXT_COLOR : GetSysColor(COLOR_BTNTEXT));
 	SetBkMode(DrawingContext, TRANSPARENT);
-
-	// This is how GDI handles memory?
-	//DeleteObject(oldPen);
-	//DeleteObject(oldBrush);
-	//DeleteObject(oldFont);
 
 	for (int i = 0; i < AppsCount; i++) {
 		struct app *app = &Apps[i];
@@ -1087,6 +1075,16 @@ static void RedrawSwitcher(void)
 			DrawTextW(DrawingContext, title, -1, &textRect, DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
 		}
 	}
+
+	// Move the original objects back since drawing has been finished
+	selectionOutline = (HPEN)SelectObject(DrawingContext, oldPen);
+	selectionBackground = (HBRUSH)SelectObject(DrawingContext, oldBrush);
+	SelectObject(DrawingContext, oldFont); // No need to delete the font, it's a stock object
+
+	// Delete the objects that we don't use any longer
+	DeleteObject(selectionOutline);
+	DeleteObject(selectionBackground);
+	DeleteObject(windowBackground);
 }
 
 static void ShowSwitcher(void)
@@ -1198,8 +1196,10 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				SelectNextWindow(true, shiftHeld, !Config.wrapbump || !keyRepeat);
 			}
 			if (Config.showSwitcherForApps) {
+				EnterCriticalSection(&lock);
 				ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 				RedrawSwitcher();
+				LeaveCriticalSection(&lock);
 				ShowSwitcher();
 			}
 			if (Config.fastSwitchingForApps) {
@@ -1220,8 +1220,10 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			SelectFirstWindow(); // Initialize selection
 			SelectNextWindow(false, shiftHeld, !Config.wrapbump || !keyRepeat);
 			if (Config.showSwitcherForWindows) {
+				EnterCriticalSection(&lock);
 				ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 				RedrawSwitcher();
+				LeaveCriticalSection(&lock);
 				ShowSwitcher();
 			}
 			if (Config.fastSwitchingForWindows) {
@@ -1269,8 +1271,10 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			if (key1Down || (nextDown || prevDown)) {
 				SelectNextWindow(true, shiftHeld || prevDown, !Config.wrapbump || !keyRepeat);
 				if (Config.showSwitcherForApps) {
+					EnterCriticalSection(&lock);
 					ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 					RedrawSwitcher();
+					LeaveCriticalSection(&lock);
 					ShowSwitcher();
 				}
 				if (Config.fastSwitchingForApps) {
@@ -1286,8 +1290,10 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			if (key2Down) {
 				SelectNextWindow(false, shiftHeld, !Config.wrapbump || !keyRepeat);
 				if (Config.showSwitcherForWindows) {
+					EnterCriticalSection(&lock);
 					ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 					RedrawSwitcher();
+					LeaveCriticalSection(&lock);
 					ShowSwitcher();
 				}
 				if (Config.fastSwitchingForWindows) {
@@ -1346,16 +1352,20 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 					SelectedApp--;
 				}
 				UpdateApps();
+				EnterCriticalSection(&lock);
 				ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 				RedrawSwitcher();
+				LeaveCriticalSection(&lock);
 				goto consumeMessage;
 			}
 			// Alt-W or Alt-Delete - close selected window
 			if (keyWDown || deleteDown) {
 				CloseWindowX(*SelectedWindow);
 				UpdateApps();
+				EnterCriticalSection(&lock);
 				ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 				RedrawSwitcher();
+				LeaveCriticalSection(&lock);
 				goto consumeMessage;
 			}
 			// Alt-M - minimize selected window
@@ -1441,14 +1451,13 @@ static void OnWindowPaint(void)
 	// BeginPaint passed our 'hwnd')
 	PAINTSTRUCT ps = {0};
 	handle context = BeginPaint(Switcher, &ps);
-	if (ps.fErase) {
-	}
+	EnterCriticalSection(&lock);
 	BitBlt(context, 0, 0, DrawingRect.right - DrawingRect.left, DrawingRect.bottom - DrawingRect.top, DrawingContext, 0, 0, SRCCOPY);
+	LeaveCriticalSection(&lock);
 	//int scale = 1.0;
 	//SetStretchBltMode(DrawingContext, HALFTONE);
 	//StretchBlt(hdc, 0, 0, gdi_width, gdi_height, DrawingContext, 0, 0, gdi_width * scale, gdi_height * scale, SRCCOPY);
 	EndPaint(Switcher, &ps);
-	ReleaseDC(Switcher, context);
 }
 
 static void OnWindowFocusChange(bool focused)
@@ -1488,6 +1497,16 @@ static void OnWindowMouseLeave(void)
 	//print(L"x%i y%i\n", MouseX, MouseY);
 }
 
+static void OnWindowSettingChange(WPARAM wParam, LPARAM lParam)
+{
+	if (!wParam && lParam && wcscmp((LPCWCH)lParam, L"ImmersiveColorSet") == 0) {
+		const bool darkmode = IsDarkModeEnabled();
+		EnterCriticalSection(&lock);
+		Config.darkmode = darkmode;
+		LeaveCriticalSection(&lock);
+	}
+}
+
 static void OnWindowClose(void)
 {
 	CancelSwitcher(false);
@@ -1519,6 +1538,9 @@ static i64 WindowProcedure(handle hwnd, u32 message, u64 wparam, i64 lparam)
 			break;
 		case WM_MOUSELEAVE:
 			OnWindowMouseLeave();
+			break;
+		case WM_SETTINGCHANGE: // to notify about a theme update, WM_SETTINGCHANGE is broadcast with lparam pointing to string "ImmersiveColorSet"
+			OnWindowSettingChange(wparam, lparam);
 			break;
 		case WM_CLOSE:
 			OnWindowClose();
@@ -1583,6 +1605,8 @@ static int RunCmdTab(handle instance, u16 *args)
 	if (AlreadyRunning(&mutex)) {
 		QuitSecondInstance();
 	}
+
+	InitializeCriticalSection(&lock);
 	
 	//
 	i32 _ = CoInitialize(null);
@@ -1604,6 +1628,11 @@ static int RunCmdTab(handle instance, u16 *args)
 	DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_ROUND;
 	DwmSetWindowAttribute(Switcher, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof corners);
 
+	// Ensure the drawing is initialized, it might be instantly used in OnWindowPaint()
+	UpdateApps();
+	ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
+	RedrawSwitcher();
+
 	// Install keyboard hook and event hooks for foreground window changes. Raymond Chen: https://devblogs.microsoft.com/oldnewthing/20130930-00/?p=3083
 	keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, (HOOKPROC)KeyboardHookProcedure, null, 0);
 	eventHook1 = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, null, EventHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
@@ -1618,7 +1647,7 @@ static int RunCmdTab(handle instance, u16 *args)
 	UnhookWinEvent(eventHook2);
 
 	CoUninitialize();
-
+	DeleteCriticalSection(&lock);
 	if (mutex) {
 		ReleaseMutex(mutex);
 		//CloseHandle(hMutex);
