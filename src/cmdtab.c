@@ -1032,7 +1032,7 @@ static void RedrawSwitcher(void)
 
 		if (app != SelectedApp) {
 			// Draw only icon, with window background
-			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, windowBackground, DI_NORMAL);
+			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, NULL, DI_NORMAL);
 		} else {
 			// Draw selection rectangle and icon, with selection background
 			RoundRect(DrawingContext, left - SEL_VERT_OFF, top - SEL_HORZ_OFF, right + SEL_VERT_OFF, bottom + SEL_HORZ_OFF, SEL_RADIUS, SEL_RADIUS);
