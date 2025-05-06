@@ -1436,12 +1436,6 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 		return 1;
 }
 
-static void OnWindowCreate(void)
-{
-	// Make the codepath hot to prevent kbd hook from timing out on first use
-	UpdateApps();
-}
-
 static void OnWindowPaint(void)
 {
 	// Double buffered drawing:
@@ -1523,9 +1517,6 @@ static void OnShellWindowActivated(handle hwnd)
 static i64 WindowProcedure(handle hwnd, u32 message, u64 wparam, i64 lparam)
 {
 	switch (message) {
-		case WM_CREATE:
-			OnWindowCreate();
-			break;
 		case WM_PAINT:
 			OnWindowPaint();
 			break;
@@ -1627,7 +1618,7 @@ static int RunCmdTab(handle instance, u16 *args)
 	// Rounded window corners
 	DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_ROUND;
 	DwmSetWindowAttribute(Switcher, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof corners);
-
+	// Make the codepath hot to prevent kbd hook from timing out on first use
 	// Ensure the drawing is initialized, it might be instantly used in OnWindowPaint()
 	UpdateApps();
 	ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
