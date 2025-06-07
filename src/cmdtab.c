@@ -632,11 +632,11 @@ static struct config Config = { // cmdtab settings
 	.restoreOnCancel         = false,
 	// Appearance
 	.darkmode                = false,
-	.switcherHeight          = 128,
-	.switcherHorzMargin      =  24,
-	.switcherVertMargin      =  32,
-	.iconWidth               =  64,
-	.iconHorzPadding         =   8,
+	.switcherHeight          = 180,
+	.switcherHorzMargin      =  32,
+	.switcherVertMargin      =  40,
+	.iconWidth               =  96,
+	.iconHorzPadding         =  12,
 	// Blacklist
 	.blacklist = {
 		{ null,                       L"ApplicationFrameWindow" },
@@ -952,6 +952,11 @@ static void ResizeSwitcher(void)
 	i32 y = mi.rcMonitor.top + (mi.rcMonitor.bottom - mi.rcMonitor.top - h) / 2;
 
 	MoveWindow(Switcher, x, y, w, h, false); // Yes, "MoveWindow" means "ResizeWindow"
+	
+	// Apply rounded corners to the window itself
+	HRGN windowRegion = CreateRoundRectRgn(0, 0, w, h, 30, 30);
+	SetWindowRgn(Switcher, windowRegion, TRUE);
+	// Note: SetWindowRgn takes ownership of the region, so don't delete it
 
 	// Resize off-screen double-buffering bitmap
 	RECT resized = {x, y, x+w, y+h};
@@ -977,37 +982,41 @@ static void RedrawSwitcher(void)
 	#define HIGHLIGHT    RGB(76, 194, 255) // Sampled from Windows 11 Alt-Tab
 	#define HIGHLIGHT_BG RGB(11, 11, 11) // Sampled from Windows 11 Alt-Tab
 
-	#define ICON_WIDTH 64
-	#define ICON_PAD    8
-	#define HORZ_PAD   24
-	#define VERT_PAD   32
+	// Use Config values instead of hardcoded constants
+	u32 ICON_WIDTH = Config.iconWidth;
+	u32 ICON_PAD   = Config.iconHorzPadding;
+	u32 HORZ_PAD   = Config.switcherHorzMargin;
+	u32 VERT_PAD   = Config.switcherVertMargin;
 
-	#define SEL_OUTLINE   3
-	#define SEL_RADIUS   10
-	#define SEL_VERT_OFF 10 // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
-	#define SEL_HORZ_OFF  6 // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
+	#define SEL_OUTLINE   4
+	#define SEL_RADIUS   25
+	#define SEL_VERT_OFF 18 // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
+	#define SEL_HORZ_OFF 12 // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
 
-	static HBRUSH windowBackground = {0};
-	static HBRUSH selectionBackground = {0};
-	static HPEN selectionOutline = {0};
-
-	// Init background brushes (static vars)
-	if (windowBackground == null) {
-		windowBackground = CreateSolidBrush(BACKGROUND);
-	}
-	if (selectionBackground == null) {
-		selectionBackground = CreateSolidBrush(HIGHLIGHT_BG);
-	}
-	//if (selection_outline == null) {
-	selectionOutline = CreatePen(PS_SOLID, SEL_OUTLINE, (GetAccentColor() & 0x00FFFFFF)); //HIGHLIGHT); // TODO Leak?
-	//}
+	// Create brushes and pens fresh each time to avoid release mode optimization issues
+	HBRUSH windowBackground = CreateSolidBrush(BACKGROUND);
+	HBRUSH selectionBackground = CreateSolidBrush(HIGHLIGHT_BG);
+	HPEN selectionOutline = CreatePen(PS_SOLID, SEL_OUTLINE, (GetAccentColor() & 0x00FFFFFF));
 
 	RECT rect = {0};
 	GetClientRect(Switcher, &rect);
 
-	// Invalidate & draw window background
+	// Invalidate & draw window background with rounded corners
 	RedrawWindow(Switcher, null, null, RDW_INVALIDATE | RDW_ERASE);
-	FillRect(DrawingContext, &rect, windowBackground);
+	
+	// Create rounded rectangle for window background
+	HRGN roundedRegion = CreateRoundRectRgn(0, 0, rect.right, rect.bottom, 30, 30);
+	FillRgn(DrawingContext, roundedRegion, windowBackground);
+	DeleteObject(roundedRegion);
+	
+	// Draw rounded border/outline to match the background
+	HPEN borderPen = CreatePen(PS_SOLID, 2, RGB(60, 60, 60)); // Subtle border
+	HPEN oldBorderPen = (HPEN)SelectObject(DrawingContext, borderPen);
+	HBRUSH oldBorderBrush = (HBRUSH)SelectObject(DrawingContext, GetStockObject(NULL_BRUSH));
+	RoundRect(DrawingContext, 1, 1, rect.right-1, rect.bottom-1, 30, 30);
+	SelectObject(DrawingContext, oldBorderPen);
+	SelectObject(DrawingContext, oldBorderBrush);
+	DeleteObject(borderPen);
 
 	// Select pen & brush for RoundRect (used to draw selection rectangle)
 	HPEN oldPen = (HPEN)SelectObject(DrawingContext, selectionOutline);
@@ -1043,12 +1052,12 @@ static void RedrawSwitcher(void)
 		//print(L"mouse %s\n", app_is_mouseover ? L"over" : L"not over");
 
 		if (app != SelectedApp) {
-			// Draw only icon, with window background
-			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, windowBackground, DI_NORMAL);
+			// Draw only icon, with transparent background
+			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, NULL, DI_NORMAL);
 		} else {
 			// Draw selection rectangle and icon, with selection background
 			RoundRect(DrawingContext, left - SEL_VERT_OFF, top - SEL_HORZ_OFF, right + SEL_VERT_OFF, bottom + SEL_HORZ_OFF, SEL_RADIUS, SEL_RADIUS);
-			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, selectionBackground, DI_NORMAL);
+			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, NULL, DI_NORMAL);
 
 			// Draw app name
 			u16 *title = app->name.text;
@@ -1087,6 +1096,11 @@ static void RedrawSwitcher(void)
 			DrawTextW(DrawingContext, title, -1, &textRect, DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
 		}
 	}
+	
+	// Clean up GDI objects to prevent memory leaks
+	DeleteObject(windowBackground);
+	DeleteObject(selectionBackground);
+	DeleteObject(selectionOutline);
 }
 
 static void ShowSwitcher(void)
@@ -1586,6 +1600,9 @@ static int RunCmdTab(handle instance, u16 *args)
 	
 	//
 	i32 _ = CoInitialize(null);
+	
+	// Enable DPI awareness for better rendering on high-DPI displays
+	SetProcessDPIAware();
 
 	// Initialize runtime-dependent settings, for example dependent on user's current kbd layout
 	InitConfig();
@@ -1600,8 +1617,8 @@ static int RunCmdTab(handle instance, u16 *args)
 	Switcher = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, MAKEINTATOM(RegisterClassExW(&wcex)), null, 0, 0, 0, 0, 0, null, null, instance, null);
 	// Clear all window styles for very plain window
 	SetWindowLongW(Switcher, GWL_STYLE, 0);
-	// Rounded window corners
-	DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_ROUND;
+	// Disable DWM window corners since we're drawing our own
+	DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_DONOTROUND;
 	DwmSetWindowAttribute(Switcher, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof corners);
 
 	// Install keyboard hook and event hooks for foreground window changes. Raymond Chen: https://devblogs.microsoft.com/oldnewthing/20130930-00/?p=3083
