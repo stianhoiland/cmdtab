@@ -993,20 +993,10 @@ static void RedrawSwitcher(void)
 	#define SEL_VERT_OFF 18 // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
 	#define SEL_HORZ_OFF 12 // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
 
-	static HBRUSH windowBackground = {0};
-	static HBRUSH selectionBackground = {0};
-	static HPEN selectionOutline = {0};
-
-	// Init background brushes (static vars)
-	if (windowBackground == null) {
-		windowBackground = CreateSolidBrush(BACKGROUND);
-	}
-	if (selectionBackground == null) {
-		selectionBackground = CreateSolidBrush(HIGHLIGHT_BG);
-	}
-	//if (selection_outline == null) {
-	selectionOutline = CreatePen(PS_SOLID, SEL_OUTLINE, (GetAccentColor() & 0x00FFFFFF)); //HIGHLIGHT); // TODO Leak?
-	//}
+	// Create brushes and pens fresh each time to avoid release mode optimization issues
+	HBRUSH windowBackground = CreateSolidBrush(BACKGROUND);
+	HBRUSH selectionBackground = CreateSolidBrush(HIGHLIGHT_BG);
+	HPEN selectionOutline = CreatePen(PS_SOLID, SEL_OUTLINE, (GetAccentColor() & 0x00FFFFFF));
 
 	RECT rect = {0};
 	GetClientRect(Switcher, &rect);
@@ -1062,12 +1052,12 @@ static void RedrawSwitcher(void)
 		//print(L"mouse %s\n", app_is_mouseover ? L"over" : L"not over");
 
 		if (app != SelectedApp) {
-			// Draw only icon, with window background
-			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, windowBackground, DI_NORMAL | DI_COMPAT);
+			// Draw only icon, with transparent background
+			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, NULL, DI_NORMAL);
 		} else {
 			// Draw selection rectangle and icon, with selection background
 			RoundRect(DrawingContext, left - SEL_VERT_OFF, top - SEL_HORZ_OFF, right + SEL_VERT_OFF, bottom + SEL_HORZ_OFF, SEL_RADIUS, SEL_RADIUS);
-			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, selectionBackground, DI_NORMAL | DI_COMPAT);
+			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, NULL, DI_NORMAL);
 
 			// Draw app name
 			u16 *title = app->name.text;
@@ -1106,6 +1096,11 @@ static void RedrawSwitcher(void)
 			DrawTextW(DrawingContext, title, -1, &textRect, DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
 		}
 	}
+	
+	// Clean up GDI objects to prevent memory leaks
+	DeleteObject(windowBackground);
+	DeleteObject(selectionBackground);
+	DeleteObject(selectionOutline);
 }
 
 static void ShowSwitcher(void)
