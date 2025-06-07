@@ -982,10 +982,11 @@ static void RedrawSwitcher(void)
 	#define HIGHLIGHT    RGB(76, 194, 255) // Sampled from Windows 11 Alt-Tab
 	#define HIGHLIGHT_BG RGB(11, 11, 11) // Sampled from Windows 11 Alt-Tab
 
-	#define ICON_WIDTH 96
-	#define ICON_PAD   12
-	#define HORZ_PAD   32
-	#define VERT_PAD   40
+	// Use Config values instead of hardcoded constants
+	u32 ICON_WIDTH = Config.iconWidth;
+	u32 ICON_PAD   = Config.iconHorzPadding;
+	u32 HORZ_PAD   = Config.switcherHorzMargin;
+	u32 VERT_PAD   = Config.switcherVertMargin;
 
 	#define SEL_OUTLINE   4
 	#define SEL_RADIUS   25
