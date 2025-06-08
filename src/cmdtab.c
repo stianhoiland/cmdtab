@@ -1208,9 +1208,12 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			}
 			ReceiveLastInputEvent();
 			SelectFirstWindow(); // Initialize selection
-			if (*SelectedWindow == GetCoreWindow(GetForegroundWindow())) { // Don't select next when on blank desktop
+			// Si la ventana seleccionada está minimizada o es el escritorio, saltar a la siguiente app
+			handle hwnd = *SelectedWindow;
+			if ((GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MINIMIZE) || hwnd == GetShellWindow()) {
 				SelectNextWindow(true, shiftHeld, !Config.wrapbump || !keyRepeat);
 			}
+			SelectNextWindow(true, shiftHeld, !Config.wrapbump || !keyRepeat); // Siempre seleccionar la siguiente app
 			if (Config.showSwitcherForApps) {
 				ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 				RedrawSwitcher();
