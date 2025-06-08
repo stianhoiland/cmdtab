@@ -1,8 +1,7 @@
 # cmdtab
 Fast and lightweight macOS-style Alt-Tab app/window switcher replacement for Windows, written in the Lord's language, C.
 
-![cmdtab-screenshot](![image](https://github.com/user-attachments/assets/061304d5-e7a9-4625-965e-094b93f1c57b)
-)
+![image](https://github.com/user-attachments/assets/061304d5-e7a9-4625-965e-094b93f1c57b)
 
 ### What's the deal?
 1. On Windows Alt-Tab cycles through different windows from different apps all mixed together, showing small window previews
