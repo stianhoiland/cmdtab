@@ -1569,10 +1569,26 @@ static bool HasAutorunLaunchArgument(u16 *args)
 	return !wcscmp(args, L"--autorun");
 }
 
+static bool IsAutorunAlreadyConfigured(void)
+{
+	HKEY regkey;
+	bool exists = false;
+	if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_READ, &regkey) == ERROR_SUCCESS) {
+		u16 buffer[MAX_PATH];
+		DWORD size = sizeof(buffer);
+		exists = (RegQueryValueExW(regkey, L"cmdtab", null, null, (LPBYTE)buffer, &size) == ERROR_SUCCESS);
+		RegCloseKey(regkey);
+	}
+	return exists;
+}
+
 static void AskAutorun(void)
 {
 	#ifndef _DEBUG // Can't be bothered to be asked about this every single debug run
-	SetAutorun(Ask(Switcher, L"Start cmdtab automatically?\nRelaunch cmdtab.exe to change your mind."), L"cmdtab", L"--autorun");
+	// Solo preguntar si no está configurado el autorun previamente
+	if (!IsAutorunAlreadyConfigured()) {
+		SetAutorun(Ask(Switcher, L"Start cmdtab automatically?\nRelaunch cmdtab.exe to change your mind."), L"cmdtab", L"--autorun");
+	}
 	#endif
 }
 
