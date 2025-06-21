@@ -472,6 +472,8 @@ static bool IsKeyDown(u32 key)
 	return (bool)(GetAsyncKeyState(key) & 0x8000);
 }
 
+
+
 static int ReportWindowHandle(handle hwnd, handle target)
 {
 	// Tell user the executable name and class so they can add it to the blacklist
@@ -583,6 +585,7 @@ struct config {
 	bool restoreOnCancel;
 	// Appearance
 	bool darkmode;
+	bool hideTaskbar;
 	u32 switcherHeight;
 	u32 switcherHorzMargin;
 	u32 switcherVertMargin;
@@ -597,16 +600,16 @@ struct config {
 
 struct app {
 	string path;                // Full path of app executable.
-	string name;                // Product description/name, or filename without extension as fallback.
+	string name;                // Window title, or app name as fallback.
 	handle icon;                // Big app icon.
-	handle windows[64];         // App windows that can be switched to.
-	size windowsCount;          // Number of elements in 'windows' array.
+	handle window;              // The specific window handle for this entry.
+	string windowTitle;         // Full window title for display.
 };
 
 static struct app Apps[128];    // Apps that are displayed in switcher.
 static size AppsCount;          // Number of elements in 'Apps' array.
 static struct app *SelectedApp; // Pointer to one of the elements in 'Apps' array. The app for the 'SelectedWindow'.
-static handle *SelectedWindow;  // Currently selected window in switcher. Non-NULL indicates switcher is active.
+static handle SelectedWindow;   // Currently selected window in switcher. Non-NULL indicates switcher is active.
 static handle RestorableWindow; // Whatever window was foreground when switcher was activated. Does not need to be in filtered 'Apps' array.
 static handle History[128];     // Window activation history from Windows events. Deduplicated, so prior activations are moved to the front.
 static size HistoryCount;       // Number of elements in 'History' array.
@@ -632,6 +635,7 @@ static struct config Config = { // cmdtab settings
 	.restoreOnCancel         = false,
 	// Appearance
 	.darkmode                = false,
+	.hideTaskbar             = true,
 	.switcherHeight          = 180,
 	.switcherHorzMargin      =  32,
 	.switcherVertMargin      =  40,
@@ -658,18 +662,46 @@ static void InitConfig(void)
 	Print(L"darkmode %s\n", Config.darkmode ? L"YES" : L"NO");
 }
 
+static void HideTaskbar(void)
+{
+	if (!Config.hideTaskbar) return;
+	
+	HWND taskbar = FindWindowW(L"Shell_TrayWnd", NULL);
+	if (taskbar) {
+		ShowWindow(taskbar, SW_HIDE);
+	}
+	
+	// También ocultar la barra de tareas secundaria en sistemas multi-monitor
+	HWND secondaryTaskbar = FindWindowW(L"Shell_SecondaryTrayWnd", NULL);
+	while (secondaryTaskbar) {
+		ShowWindow(secondaryTaskbar, SW_HIDE);
+		secondaryTaskbar = FindWindowExW(NULL, secondaryTaskbar, L"Shell_SecondaryTrayWnd", NULL);
+	}
+}
+
+static void ShowTaskbar(void)
+{
+	HWND taskbar = FindWindowW(L"Shell_TrayWnd", NULL);
+	if (taskbar) {
+		ShowWindow(taskbar, SW_SHOW);
+	}
+	
+	// También mostrar la barra de tareas secundaria en sistemas multi-monitor
+	HWND secondaryTaskbar = FindWindowW(L"Shell_SecondaryTrayWnd", NULL);
+	while (secondaryTaskbar) {
+		ShowWindow(secondaryTaskbar, SW_SHOW);
+		secondaryTaskbar = FindWindowExW(NULL, secondaryTaskbar, L"Shell_SecondaryTrayWnd", NULL);
+	}
+}
+
 static void PrintApps(void)
 {
 	int windowsCount = 0;
 	for (int i = 0; i < AppsCount; i++) {
 		Print(L"%i ", i);
 		struct app *app = &Apps[i];
-		PrintWindowX(app->windows[0]);
-		windowsCount += app->windowsCount;
-		for (int j = 1; j < app->windowsCount; j++) {
-			Print(L"  %i ", j);
-			PrintWindowX(app->windows[j]);
-		}
+		PrintWindowX(app->window);
+		windowsCount += 1;
 	}
 	Print(L"%i apps %i windows, %i history:\n", AppsCount, windowsCount, HistoryCount);
 	// And print History
@@ -787,66 +819,55 @@ static void AddToSwitcher(handle hwnd)
 		PrintWindowX(hwnd);
 		return;
 	}
-	// 5. Find existing app with same module filepath
-	struct app *app = null;
-	for (int i = 0; i < AppsCount; i++) {
-		if (StringsAreEqual(&filepath, &Apps[i].path)) {
-			app = &Apps[i];
-			break;
-		}
-	}
-	// 6. If app not already tracked, create new app entry
-	if (!app) {
-		if (AppsCount >= countof(Apps)) {
-			Error(Switcher, L"ERROR reached max. apps\n");
-			return;
-		}
-		// Since I reset by truncating (setting AppsCount to 0), make sure to overwrite all struct fields when reusing array slots
-		app = &Apps[AppsCount++];
-		if (app->icon) DestroyIcon(app->icon); // In fact, I have to do a little lazy cleanup
-		app->path = filepath;
-		app->name = GetAppName(&filepath);
-		app->icon = GetAppIcon(&filepath);
-		app->windowsCount = 0; // Same truncation trick here (but hwnds are not structs, so no fields to overwrite)
-	}
-	if (app->windowsCount >= countof(app->windows)) {
-		Error(Switcher, L"ERROR reached max. windows for app\n");
+	
+	// 5. Create individual entry for each window (no grouping)
+	if (AppsCount >= countof(Apps)) {
+		Error(Switcher, L"ERROR reached max. windows\n");
 		return;
 	}
-	// 7. Add window to app's window list
-	app->windows[app->windowsCount++] = hwnd;
+	
+	struct app *app = &Apps[AppsCount++];
+	if (app->icon) DestroyIcon(app->icon); // Cleanup previous icon if reusing slot
+	
+	// Set basic app info
+	app->path = filepath;
+	app->window = hwnd;
+	app->icon = GetAppIcon(&filepath);
+	
+	// Get window title for more descriptive names
+	string windowTitle = GetWindowTitle(hwnd);
+	app->windowTitle = windowTitle;
+	
+	// Use window title as name, fallback to app name if title is empty
+	if (windowTitle.ok && windowTitle.length > 0) {
+		app->name = windowTitle;
+	} else {
+		app->name = GetAppName(&filepath);
+	}
+	
 	Print(L"add window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
 	PrintWindowX(hwnd);
 }
 
 static void ActivateWindow(handle hwnd)
 {
-	// Find existing app and window
-	struct app *app = null;
-	handle *window = null;
+	// Find the specific window entry and move it to front
+	struct app *targetApp = null;
+	int targetIndex = -1;
+	
 	for (int i = 0; i < AppsCount; i++) {
-		app = &Apps[i];
-		for (int j = 0; j < app->windowsCount; j++) {
-			if (app->windows[j] == hwnd) {
-				window = &app->windows[j];
-				break;
-			}
+		if (Apps[i].window == hwnd) {
+			targetApp = &Apps[i];
+			targetIndex = i;
+			break;
 		}
-		if (window) break;
 	}
-	// Put window first in app's window list and app first in app list
-	if (window) {
-		if (window > &app->windows[0]) { // Don't shift if already first
-			// Shift other windows down to position of 'window' and put 'window' first
-			memmove(&app->windows[1], &app->windows[0], sizeof app->windows[0] * (window - app->windows)); // i.e. index
-			app->windows[0] = hwnd;
-		}
-		if (app > &Apps[0]) { // Don't shift if already first
-			// Shift other apps down to position of 'app' and put 'app' first
-			struct app temp = *app; // This is a 1.6kb copy
-			memmove(&Apps[1], &Apps[0], sizeof Apps[0] * (app - Apps)); // i.e. index
-			Apps[0] = temp;
-		}
+	
+	// Move window to front of list if found and not already first
+	if (targetApp && targetIndex > 0) {
+		struct app temp = *targetApp;
+		memmove(&Apps[1], &Apps[0], sizeof(Apps[0]) * targetIndex);
+		Apps[0] = temp;
 	}
 }
 
@@ -877,7 +898,7 @@ static void SelectFirstWindow(void)
 {
 	if (AppsCount > 0) {
 		SelectedApp = &Apps[0];
-		SelectedWindow = &Apps[0].windows[0];
+		SelectedWindow = Apps[0].window; // Point directly to the window handle
 		RestorableWindow = GetForegroundWindow();
 	} else {
 		Print(L"nothing to select\n");
@@ -886,52 +907,34 @@ static void SelectFirstWindow(void)
 
 static void SelectNextWindow(bool applevel, bool reverse, bool wrap)
 {
-	if (!SelectedApp || !SelectedWindow) {
-		Error(Switcher, L"invalid state: no SelectedApp or no SelectedWindow");
-		Debug(L"invalid state: no SelectedApp or no SelectedWindow");
+	if (!SelectedApp) {
+		Error(Switcher, L"invalid state: no SelectedApp");
+		Debug(L"invalid state: no SelectedApp");
 		return;
 	}
-	/*dbg*/struct app *oldApp = SelectedApp;
-	/*dbg*/handle *oldWindow = SelectedWindow;
-	if (applevel) {
-		struct app *firstApp = &Apps[0];
-		struct app  *lastApp = &Apps[AppsCount-1];
-		if (reverse) {
-			if (SelectedApp > firstApp) {
-				SelectedApp--;
-			} else if (wrap) {
-				SelectedApp = lastApp;
-			}
-		} else {
-			if (SelectedApp < lastApp) {
-				SelectedApp++;
-			} else if (wrap) {
-				SelectedApp = firstApp;
-			}
+	
+	// Since each entry is now a single window, navigation is always at "app level"
+	struct app *firstApp = &Apps[0];
+	struct app *lastApp = &Apps[AppsCount-1];
+	
+	if (reverse) {
+		if (SelectedApp > firstApp) {
+			SelectedApp--;
+		} else if (wrap) {
+			SelectedApp = lastApp;
 		}
-		SelectedWindow = &SelectedApp->windows[0];
 	} else {
-		handle *firstWindow = &SelectedApp->windows[0];
-		handle  *lastWindow = &SelectedApp->windows[SelectedApp->windowsCount-1];
-		if (reverse) {
-			if (SelectedWindow > firstWindow) {
-				SelectedWindow--;
-			} else if (wrap) {
-				SelectedWindow = lastWindow;
-			}
-		} else {
-			if (SelectedWindow < lastWindow) {
-				SelectedWindow++;
-			} else if (wrap) {
-				SelectedWindow = firstWindow;
-			}
+		if (SelectedApp < lastApp) {
+			SelectedApp++;
+		} else if (wrap) {
+			SelectedApp = firstApp;
 		}
 	}
-	/*dbg*/
-	if (oldApp != SelectedApp || oldWindow != SelectedWindow) {
-		Print(L"select ");
-		PrintWindowX(*SelectedWindow);
-	}
+	
+	SelectedWindow = SelectedApp->window;
+	
+	Print(L"select ");
+	PrintWindowX(SelectedWindow);
 }
 
 static void ResizeSwitcher(void)
@@ -1209,7 +1212,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			ReceiveLastInputEvent();
 			SelectFirstWindow(); // Initialize selection
 			// Si la ventana seleccionada está minimizada o es el escritorio, saltar a la siguiente app
-			handle hwnd = *SelectedWindow;
+			handle hwnd = SelectedWindow;
 			if ((GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MINIMIZE) || hwnd == GetShellWindow()) {
 				SelectNextWindow(true, shiftHeld, !Config.wrapbump || !keyRepeat);
 			}
@@ -1220,7 +1223,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				ShowSwitcher();
 			}
 			if (Config.fastSwitchingForApps) {
-				ShowWindowX(*SelectedWindow);
+				ShowWindowX(SelectedWindow);
 			}
 			// Since I "own" this hotkey system-wide, I consume this message unconditionally
 			// This will consume the key1Down event. Windows will not know that key1 was pressed
@@ -1242,7 +1245,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				ShowSwitcher();
 			}
 			if (Config.fastSwitchingForWindows) {
-				ShowWindowX(*SelectedWindow);
+				ShowWindowX(SelectedWindow);
 			}
 			// Since I "own" this hotkey system-wide, I consume this message unconditionally
 			// This will consume the key2Down event. Windows will not know that key2 was pressed
@@ -1264,7 +1267,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			// 1) cmdtab never hooks mod keydowns
 			// 2) cmdtab hooks mod keyups, but always passes it through on pain of getting a stuck Alt key because of point 1
 			ReceiveLastInputEvent();
-			ShowWindowX(*SelectedWindow);
+			ShowWindowX(SelectedWindow);
 			CancelSwitcher(false);
 			goto passMessage; // See note above on "Alt keyup" on why I don't consume this message
 		} else {
@@ -1291,7 +1294,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 					ShowSwitcher();
 				}
 				if (Config.fastSwitchingForApps) {
-					PreviewWindow(*SelectedWindow);
+					PreviewWindow(SelectedWindow);
 				}
 				// Since I "own" this hotkey system-wide, I consume this message unconditionally
 				// This will consume the key1Down event. Windows will not know that key1 was pressed
@@ -1308,7 +1311,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 					ShowSwitcher();
 				}
 				if (Config.fastSwitchingForWindows) {
-					PreviewWindow(*SelectedWindow);
+					PreviewWindow(SelectedWindow);
 				}
 				// Since I "own" this hotkey system-wide, I consume this message unconditionally
 				// This will consume the key2Down event. Windows will not know that key2 was pressed
@@ -1324,7 +1327,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 
 			// Alt-Enter - switch to selected window
 			if (enterDown) {
-				ShowWindowX(*SelectedWindow);
+				ShowWindowX(SelectedWindow);
 				CancelSwitcher(false);
 				// Since our swicher is active, I "own" this hotkey, so I consume this message
 				// This will consume the enterDown event. Windows will not know that Enter was pressed
@@ -1357,8 +1360,8 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			}
 			// Alt-Q - close all windows of selected application
 			if (keyQDown) {
-				//CloseWindows(*SelectedWindow);
-				TerminateWindowProcess(*SelectedWindow);
+				//CloseWindows(SelectedWindow);
+				TerminateWindowProcess(SelectedWindow);
 				if (SelectedApp == &Apps[AppsCount-1] && AppsCount > 1) {
 					SelectedApp--;
 				}
@@ -1369,7 +1372,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			}
 			// Alt-W or Alt-Delete - close selected window
 			if (keyWDown || deleteDown) {
-				CloseWindowX(*SelectedWindow);
+				CloseWindowX(SelectedWindow);
 				UpdateApps();
 				ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 				RedrawSwitcher();
@@ -1377,17 +1380,17 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			}
 			// Alt-M - minimize selected window
 			if (keyMDown) {
-				MinimizeWindow(*SelectedWindow);
+				MinimizeWindow(SelectedWindow);
 				goto consumeMessage;
 			}
 			// Alt-H - hide selected window
 			if (keyHDown) {
-				//HideWindow(*SelectedWindow); // WARNING Can't use this because we filter out hidden windows
+				//HideWindow(SelectedWindow); // WARNING Can't use this because we filter out hidden windows
 				goto consumeMessage;
 			}
 			// Alt-B - display app name and window class to user, to add in blacklist
 			if (keyBDown) {
-				handle selectedWindow = *SelectedWindow; // CancelSwitcher resets SelectedWindow
+				handle selectedWindow = SelectedWindow; // CancelSwitcher resets SelectedWindow
 				CancelSwitcher(false);
 				ReportWindowHandle(Switcher, selectedWindow);
 				goto consumeMessage;
@@ -1509,6 +1512,7 @@ static void OnWindowClose(void)
 {
 	CancelSwitcher(false);
 	if (Ask(Switcher, L"Quit cmdtab?")) {
+		ShowTaskbar(); // Restore taskbar before closing
 		DestroyWindow(Switcher);//return DefWindowProcW(hwnd, message, wparam, lparam); // Calls DestroyWindow
 	}
 }
@@ -1625,6 +1629,9 @@ static int RunCmdTab(handle instance, u16 *args)
 
 	// Initialize runtime-dependent settings, for example dependent on user's current kbd layout
 	InitConfig();
+	
+	// Hide taskbar if enabled
+	HideTaskbar();
 
 	// Create switcher window
 	WNDCLASSEXW wcex = {0};
@@ -1652,6 +1659,9 @@ static int RunCmdTab(handle instance, u16 *args)
 	UnhookWindowsHookEx(keyboardHook);
 	UnhookWinEvent(eventHook1);
 	UnhookWinEvent(eventHook2);
+	
+	// Restore taskbar before exiting
+	ShowTaskbar();
 
 	CoUninitialize();
 
