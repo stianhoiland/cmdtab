@@ -579,6 +579,7 @@ struct config {
 	bool fastSwitchingForWindows;
 	bool showSwitcherForApps;
 	bool showSwitcherForWindows;
+	bool showAllWindows;  // collapse two navigation levels (apps, windows) into one
 	bool wrapbump;
 	bool restoreOnCancel;
 	// Appearance
@@ -628,6 +629,7 @@ static struct config Config = { // cmdtab settings
 	.fastSwitchingForWindows = true,
 	.showSwitcherForApps     = true,
 	.showSwitcherForWindows  = false,
+	.showAllWindows          = true,
 	.wrapbump                = true,
 	.restoreOnCancel         = false,
 	// Appearance
