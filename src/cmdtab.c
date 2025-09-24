@@ -677,8 +677,52 @@ static struct config Config = { // cmdtab settings
 	},
 };
 
+static void LoadConfigFromIni(void)
+{
+    u16 iniPath[MAX_PATH];
+
+    // Get the directory of the executable
+    GetModuleFileNameW(null, iniPath, countof(iniPath));
+    PathCchRemoveFileSpec(iniPath, countof(iniPath));
+    PathCchAppend(iniPath, countof(iniPath), L"cmdtab.ini");
+
+    // Check if INI file exists
+    if (GetFileAttributesW(iniPath) == INVALID_FILE_ATTRIBUTES) {
+        Print(L"No cmdtab.ini found, using default config\n");
+        return;
+    }
+
+    Print(L"Loading config from: %s\n", iniPath);
+
+    // Read behavior settings
+    Config.switchApps = GetPrivateProfileIntW(L"Behavior", L"switchApps", Config.switchApps, iniPath);
+    Config.switchWindows = GetPrivateProfileIntW(L"Behavior", L"switchWindows", Config.switchWindows, iniPath);
+    Config.fastSwitchingForApps = GetPrivateProfileIntW(L"Behavior", L"fastSwitchingForApps", Config.fastSwitchingForApps, iniPath);
+    Config.fastSwitchingForWindows = GetPrivateProfileIntW(L"Behavior", L"fastSwitchingForWindows", Config.fastSwitchingForWindows, iniPath);
+    Config.showSwitcherForApps = GetPrivateProfileIntW(L"Behavior", L"showSwitcherForApps", Config.showSwitcherForApps, iniPath);
+    Config.showSwitcherForWindows = GetPrivateProfileIntW(L"Behavior", L"showSwitcherForWindows", Config.showSwitcherForWindows, iniPath);
+    Config.showAllWindows = GetPrivateProfileIntW(L"Behavior", L"showAllWindows", Config.showAllWindows, iniPath);
+    Config.wrapbump = GetPrivateProfileIntW(L"Behavior", L"wrapbump", Config.wrapbump, iniPath);
+    Config.restoreOnCancel = GetPrivateProfileIntW(L"Behavior", L"restoreOnCancel", Config.restoreOnCancel, iniPath);
+
+    // Read appearance settings
+    Config.switcherHeight = GetPrivateProfileIntW(L"Appearance", L"switcherHeight", Config.switcherHeight, iniPath);
+    Config.switcherHorzMargin = GetPrivateProfileIntW(L"Appearance", L"switcherHorzMargin", Config.switcherHorzMargin, iniPath);
+    Config.switcherVertMargin = GetPrivateProfileIntW(L"Appearance", L"switcherVertMargin", Config.switcherVertMargin, iniPath);
+    Config.iconWidth = GetPrivateProfileIntW(L"Appearance", L"iconWidth", Config.iconWidth, iniPath);
+    Config.iconHorzPadding = GetPrivateProfileIntW(L"Appearance", L"iconHorzPadding", Config.iconHorzPadding, iniPath);
+
+    // Read hotkey settings (scan codes)
+    Config.hotkeyForApps.mod = GetPrivateProfileIntW(L"Hotkeys", L"appsModifier", 0x38, iniPath);
+    Config.hotkeyForApps.key = GetPrivateProfileIntW(L"Hotkeys", L"appsKey", 0x0F, iniPath);
+    Config.hotkeyForWindows.mod = GetPrivateProfileIntW(L"Hotkeys", L"windowsModifier", 0x38, iniPath);
+    Config.hotkeyForWindows.key = GetPrivateProfileIntW(L"Hotkeys", L"windowsKey", 0x29, iniPath);
+}
+
 static void InitConfig(void)
 {
+	// Starting point are the hardcoded defaults in 'Config' struct initializer
+	LoadConfigFromIni();
 	// Initialize runtime-dependent settings, like those dependent on user's current kbd layout
 	// The default key2 is scan code 0x29 (hex) / 41 (decimal)
 	// This is the key that is physically below Esc, left of 1 and above Tab
