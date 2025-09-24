@@ -659,7 +659,7 @@ static struct config Config = { // cmdtab settings
 	.fastSwitchingForWindows = true,
 	.showSwitcherForApps     = true,
 	.showSwitcherForWindows  = false,
-	.showAllWindows          = true,
+	.showAllWindows          = false,
 	.wrapbump                = true,
 	.restoreOnCancel         = false,
 	// Appearance
