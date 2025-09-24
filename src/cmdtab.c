@@ -424,6 +424,36 @@ static handle GetAppIcon(string *filepath)
 	return icon; // Caller is responsible for calling DestroyIcon
 }
 
+static handle GetWindowIcon(handle hwnd)
+{
+	// Get the window's specific icon (largest available)
+	HICON icon = (HICON)SendMessageW(hwnd, WM_GETICON, ICON_BIG, 0);
+	if (!icon) {
+		icon = (HICON)SendMessageW(hwnd, WM_GETICON, ICON_SMALL2, 0);
+	}
+	if (!icon) {
+		icon = (HICON)SendMessageW(hwnd, WM_GETICON, ICON_SMALL, 0);
+	}
+	// Else fall back to class icon
+	if (!icon) {
+		icon = (HICON)GetClassLongPtrW(hwnd, GCLP_HICON);
+	}
+	if (!icon) {
+		icon = (HICON)GetClassLongPtrW(hwnd, GCLP_HICONSM);
+	}
+	// Return icon if we found one
+	if (icon) {
+		return CopyIcon(icon);  // we don't own the original
+	}
+	// Else fall back to app icon from executable
+	string filepath = GetExePath(hwnd);
+	if (filepath.ok) {
+		return GetAppIcon(&filepath);
+	}
+    // Else give up
+	return null;
+}
+
 static bool IsDarkModeEnabled(void)
 {
 	ULONG value;
@@ -812,7 +842,7 @@ static void AddWindowLikeAnApp(handle hwnd, string filepath) {
 	if (!windowEntry->name.ok || windowEntry->name.length == 0) {
 		windowEntry->name = GetAppName(&filepath); // Fallback to app name
 	}
-	windowEntry->icon = GetAppIcon(&filepath);
+	windowEntry->icon = GetWindowIcon(hwnd);
 	windowEntry->windowsCount = 1;
 	windowEntry->windows[0] = hwnd;
 }
