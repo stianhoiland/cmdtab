@@ -82,7 +82,7 @@ static const string UWPAppHostClass    = string(L"ApplicationFrameWindow");
 static const string UWPCoreWindowClass = string(L"Windows.UI.Core.CoreWindow");
 static const string UWPAppsPath        = string(L"C:\\Program Files\\WindowsApps");
 
-static bool StringsAreEqual(string *s1, string *s2)
+static bool StringsAreEqual(const string *s1, const string *s2)
 {
 	// Reverse compare strings
 	// Compare in reverse since this function is mostly used to compare file
