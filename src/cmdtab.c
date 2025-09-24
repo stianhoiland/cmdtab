@@ -764,6 +764,59 @@ static void AddToHistory(handle hwnd) {
 	PrintWindowX(hwnd);
 }
 
+static bool AddAppOrCollectWindow(handle hwnd, string filepath) {
+	// 5. Find existing app with same module filepath
+	struct app *app = null;
+	for (int i = 0; i < AppsCount; i++) {
+		if (StringsAreEqual(&filepath, &Apps[i].path)) {
+			app = &Apps[i];
+			break;
+		}
+	}
+	// 6. If app not already tracked, create new app entry
+	if (!app) {
+		if (AppsCount >= countof(Apps)) {
+			Error(Switcher, L"ERROR reached max. apps\n");
+			return true;
+		}
+		// Since I reset by truncating (setting AppsCount to 0), make sure to overwrite all struct fields when reusing array slots
+		app = &Apps[AppsCount++];
+		if (app->icon) DestroyIcon(app->icon); // In fact, I have to do a little lazy cleanup
+		app->path = filepath;
+		app->name = GetAppName(&filepath);
+		app->icon = GetAppIcon(&filepath);
+		app->windowsCount = 0; // Same truncation trick here (but hwnds are not structs, so no fields to overwrite)
+	}
+	if (app->windowsCount >= countof(app->windows)) {
+		Error(Switcher, L"ERROR reached max. windows for app\n");
+		return true;
+	}
+	// 7. Add window to app's window list
+	app->windows[app->windowsCount++] = hwnd;
+	Print(L"add window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
+	PrintWindowX(hwnd);
+	return false;
+}
+
+static void AddWindowLikeAnApp(handle hwnd, string filepath) {
+	// 5. Create one pseudo-"app" entry per window
+	if (AppsCount >= countof(Apps)) {
+		Error(Switcher, L"ERROR reached max. windows\n");
+		return;
+	}
+	struct app *windowEntry = &Apps[AppsCount++];
+	if (windowEntry->icon) DestroyIcon(windowEntry->icon);
+
+	windowEntry->path = filepath;
+	windowEntry->name = GetWindowTitle(hwnd); // Use window title instead of app name
+	if (!windowEntry->name.ok || windowEntry->name.length == 0) {
+		windowEntry->name = GetAppName(&filepath); // Fallback to app name
+	}
+	windowEntry->icon = GetAppIcon(&filepath);
+	windowEntry->windowsCount = 1;
+	windowEntry->windows[0] = hwnd;
+}
+
 static void AddToSwitcher(handle hwnd)
 {
 	// 1. Get hosted window in case of UWP host
@@ -789,36 +842,11 @@ static void AddToSwitcher(handle hwnd)
 		PrintWindowX(hwnd);
 		return;
 	}
-	// 5. Find existing app with same module filepath
-	struct app *app = null;
-	for (int i = 0; i < AppsCount; i++) {
-		if (StringsAreEqual(&filepath, &Apps[i].path)) {
-			app = &Apps[i];
-			break;
-		}
+	if (Config.showAllWindows) {
+		AddWindowLikeAnApp(hwnd, filepath);
+	} else {
+		AddAppOrCollectWindow(hwnd, filepath);
 	}
-	// 6. If app not already tracked, create new app entry
-	if (!app) {
-		if (AppsCount >= countof(Apps)) {
-			Error(Switcher, L"ERROR reached max. apps\n");
-			return;
-		}
-		// Since I reset by truncating (setting AppsCount to 0), make sure to overwrite all struct fields when reusing array slots
-		app = &Apps[AppsCount++];
-		if (app->icon) DestroyIcon(app->icon); // In fact, I have to do a little lazy cleanup
-		app->path = filepath;
-		app->name = GetAppName(&filepath);
-		app->icon = GetAppIcon(&filepath);
-		app->windowsCount = 0; // Same truncation trick here (but hwnds are not structs, so no fields to overwrite)
-	}
-	if (app->windowsCount >= countof(app->windows)) {
-		Error(Switcher, L"ERROR reached max. windows for app\n");
-		return;
-	}
-	// 7. Add window to app's window list
-	app->windows[app->windowsCount++] = hwnd;
-	Print(L"add window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
-	PrintWindowX(hwnd);
 }
 
 static void ActivateWindow(handle hwnd)
