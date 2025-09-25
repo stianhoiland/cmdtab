@@ -656,6 +656,7 @@ static handle DrawingBitmap;    // Off-screen bitmap used for double-buffered dr
 static RECT DrawingRect;        // Size of the off-screen bitmap.
 static u16 Keyboard[16];        // 256 bits to track key repeat for low-level keyboard hook.
 static i32 MouseX, MouseY;      // Mouse position, for highlighting and clicking app icons.
+static u32 Width, Height;       // Size of the switcher window.
 
 static struct config Config = { // cmdtab settings
 	// Hotkeys
@@ -1071,19 +1072,24 @@ static void ResizeSwitcher(void)
 	MONITORINFO mi = { .cbSize = sizeof(MONITORINFO) };
 	GetMonitorInfoW(MonitorFromPoint(mousePos, MONITOR_DEFAULTTONEAREST), &mi);
 
-	u32   iconsWidth = AppsCount * Config.iconWidth;
-	u32 paddingWidth = AppsCount * Config.iconHorzPadding * 2;
-	u32  marginWidth =         2 * Config.switcherHorzMargin;
+	// Calculate rows and columns
+	u32 rows = (AppsCount + Config.rowLength - 1) / Config.rowLength; // Ceiling division
+	u32 cols = AppsCount < Config.rowLength ? AppsCount : Config.rowLength;
 
-	u32 w = iconsWidth + paddingWidth + marginWidth;
-	u32 h = Config.switcherHeight;
-	i32 x = mi.rcMonitor.left + (mi.rcMonitor.right - mi.rcMonitor.left - w) / 2;
-	i32 y = mi.rcMonitor.top + (mi.rcMonitor.bottom - mi.rcMonitor.top - h) / 2;
+	u32   iconsWidth = cols * Config.iconWidth;
+	u32 paddingWidth = 2 * Config.paddingLeftRight + (cols-1) * Config.paddingBetweenCols;
+	u32  iconsHeight = rows * (Config.iconWidth + Config.paddingTitleTop + Config.titleHeight);
+	u32 paddingHeight = Config.paddingTop + (rows-1) * Config.paddingBetweenRows + Config.paddingBottom;
 
-	MoveWindow(Switcher, x, y, w, h, false); // Yes, "MoveWindow" means "ResizeWindow"
+	Width = iconsWidth + paddingWidth;
+	Height = iconsHeight + paddingHeight;
+	i32 x = mi.rcMonitor.left + (mi.rcMonitor.right - mi.rcMonitor.left - Width) / 2;
+	i32 y = mi.rcMonitor.top + (mi.rcMonitor.bottom - mi.rcMonitor.top - Height) / 2;
+
+	MoveWindow(Switcher, x, y, Width, Height, false);
 
 	// Resize off-screen double-buffering bitmap
-	RECT resized = {x, y, x+w, y+h};
+	RECT resized = {x, y, x+Width, y+Height};
 	if (!EqualRect(&DrawingRect, &resized)) {
 		handle context = GetDC(Switcher);
 		DeleteObject(DrawingBitmap);
@@ -1099,6 +1105,7 @@ static void ResizeSwitcher(void)
 
 static void RedrawSwitcher(void)
 {
+	// relies on global vars set by ResizeSwitcher()
 	// TODO Use 'Config.style'
 
 	#define BACKGROUND   RGB(32, 32, 32) // dark mode?
@@ -1151,71 +1158,73 @@ static void RedrawSwitcher(void)
 	//DeleteObject(oldPen);
 	//DeleteObject(oldBrush);
 	//DeleteObject(oldFont);
-
+	RECT selectedAppTextRect;
 	for (int i = 0; i < AppsCount; i++) {
 		struct app *app = &Apps[i];
 
-		// Special-case math for index 0
-		i32  left0 = i == 0 ? ICON_PAD : 0;
-		i32 right0 = i != 0 ? ICON_PAD : 0;
+		// Calculate row and column for this icon
+		u32 row = i / Config.rowLength;
+		u32 col = i % Config.rowLength;
 
-		i32  icons = (ICON_PAD + ICON_WIDTH + ICON_PAD) * i;
-		i32   left = HORZ_PAD + left0 + icons + right0;
-		i32    top = VERT_PAD;
-		i32  width = ICON_WIDTH;
-		i32 height = ICON_WIDTH;
-		i32  right = left + width;
-		i32 bottom = top + height;
+		// Calculate position based on row/column
+		i32 iconX = Config.paddingLeftRight +
+			col * (Config.iconWidth + Config.paddingBetweenCols);
+		i32 iconY = Config.paddingTop +
+			row * (Config.iconWidth + Config.paddingTitleTop + Config.titleHeight) +
+			(row-1) * Config.paddingBetweenRows;
 
-		//RECT icon_rect = (RECT){left, top, right, bottom};
-		//bool app_is_mouseover = PtInRect(&icon_rect, (POINT){MouseX, MouseY});
-		//print(L"mouse %s\n", app_is_mouseover ? L"over" : L"not over");
+		// Perhaps draw selection rectangle
+		if (app == SelectedApp) {
+			i32 selX = iconX - SEL_HORZ_OFF;
+			i32 selY = iconY - SEL_VERT_OFF;
+			i32 selW = Config.iconWidth + SEL_HORZ_OFF * 2;
+			i32 selH = Config.iconWidth + SEL_VERT_OFF * 2;
+			RoundRect(DrawingContext, selX, selY, selX + selW, selY + selH, SEL_RADIUS, SEL_RADIUS);
+		}
 
+		// Draw app icon and title
+		if (app->icon) {
+			DrawIconEx(DrawingContext, iconX, iconY, app->icon, Config.iconWidth, Config.iconWidth, 0, null, DI_NORMAL);
+		}
+		i32 textTop = iconY + Config.iconWidth + Config.paddingTitleTop;
+		i32 textBottom = textTop + Config.titleHeight;
+		RECT textRect = {
+			iconX,
+			textTop,
+			iconX + Config.iconWidth,
+			textBottom,
+		};
 		if (app != SelectedApp) {
-			// Draw only icon, with window background
-			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, windowBackground, DI_NORMAL);
+			DrawTextW(DrawingContext, app->name.text, app->name.length, &textRect,
+				DT_CENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 		} else {
-			// Draw selection rectangle and icon, with selection background
-			RoundRect(DrawingContext, left - SEL_VERT_OFF, top - SEL_HORZ_OFF, right + SEL_VERT_OFF, bottom + SEL_HORZ_OFF, SEL_RADIUS, SEL_RADIUS);
-			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, selectionBackground, DI_NORMAL);
-
-			// Draw app name
-			u16 *title = app->name.text;
-
-			// Measure text width
-			RECT testRect = {0};
-			DrawTextW(DrawingContext, title, -1, &testRect, DT_CALCRECT | DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
-			i32 textWidth = (testRect.right - testRect.left) + 2; // Hmm, measured size seems a teensy bit too small, so +2
-
-			// DrawTextW uses a destination rect for drawing
-			RECT textRect = {0};
-			textRect.left = left;
-			textRect.right = right;
-			textRect.bottom = rect.bottom;
-
-			i32 widthDiff = textWidth - (textRect.right - textRect.left);
-			if (widthDiff > 0) {
-				// textRect is too small for text, grow the rect
-				textRect.left -= (i32)ceil(widthDiff / 2.0);
-				textRect.right += (i32)floor(widthDiff / 2.0);
-			}
-
-			textRect.bottom -= ICON_PAD; // *** this lifts the app text up a little ***
-
-			// If the app name, when centered, extends past window bounds, adjust label position to be inside window bounds
-			if (textRect.right > rect.right) {
-				textRect.left -= (textRect.right - rect.right) + ICON_PAD;
-				textRect.right = rect.right - ICON_PAD;
-			}
-			if (textRect.left < 0) {
-				textRect.right += ICON_PAD + abs(textRect.left);
-				textRect.left   = ICON_PAD + 0;
-			}
-
-			///* dbg */ FillRect(DrawingContext, &textRect, CreateSolidBrush(RGB(255, 0, 0))); // Check the size of the text box
-			DrawTextW(DrawingContext, title, -1, &textRect, DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
+			selectedAppTextRect = textRect;
 		}
 	}
+	// draw full title for selected app
+	RECT testRect = {0};
+	DrawTextW(DrawingContext, SelectedApp->name.text, SelectedApp->name.length, &testRect,
+		DT_CALCRECT | DT_SINGLELINE | DT_CENTER);  // measure text width
+	i32 textWidth = (testRect.right - testRect.left) + 2 * Config.paddingBetweenCols;
+	i32 widthDiff = textWidth - (selectedAppTextRect.right - selectedAppTextRect.left);
+	if (widthDiff > 0) {
+		// textRect is too small for text, grow the rect
+		selectedAppTextRect.left -= (i32)ceil(widthDiff / 2.0);
+		selectedAppTextRect.right += (i32)floor(widthDiff / 2.0);
+	}
+	// If the app name, when centered, extends past window bounds, adjust label position to be inside window bounds
+	if (selectedAppTextRect.right > Width) {
+		selectedAppTextRect.left -= (selectedAppTextRect.right - Width);
+		selectedAppTextRect.right = Width;
+	}
+	if (selectedAppTextRect.left < 0) {
+		selectedAppTextRect.left   = Config.paddingBetweenCols;
+	}
+	FillRect(DrawingContext, &selectedAppTextRect, CreateSolidBrush(BACKGROUND)); // Make room
+	SetTextColor(DrawingContext, HIGHLIGHT);
+	// SetBkMode(DrawingContext, OPAQUE);
+	DrawTextW(DrawingContext, SelectedApp->name.text, SelectedApp->name.length, &selectedAppTextRect,
+		DT_CENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 }
 
 static void ShowSwitcher(void)
