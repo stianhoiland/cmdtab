@@ -674,11 +674,7 @@ static struct config Config = { // cmdtab settings
 	.restoreOnCancel         = false,
 	// Appearance
 	.darkmode                = false,
-	.switcherHeight          = 128,
-	.switcherHorzMargin      =  24,
-	.switcherVertMargin      =  32,
 	.iconWidth               =  64,
-	.iconHorzPadding         =   8,
 	.paddingTop              =  48,
 	.paddingBottom           =  48,
 	.paddingLeftRight        =  48,
