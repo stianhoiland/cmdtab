@@ -7,6 +7,14 @@ set(BUILD_TYPE "Debug")
 
 add_executable(cmdtab WIN32 "src/cmdtab.c" "res/cmdtab.rc")
 
+# Copy cmdtab.ini to build directory
+add_custom_command(TARGET cmdtab POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/src/cmdtab.ini"
+        "$<TARGET_FILE_DIR:cmdtab>/cmdtab.ini"
+        COMMENT "Copying cmdtab.ini to build directory"
+)
+
 #set_property(TARGET ${PROJECT_NAME} PROPERTY
     #LINK_FLAGS /MANIFESTUAC:"level='highestAvailable' uiAccess='true'"
 #)
