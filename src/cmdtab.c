@@ -619,6 +619,15 @@ struct config {
 	u32 switcherVertMargin;
 	u32 iconWidth;
 	u32 iconHorzPadding;
+	// New padding options (before rowLength)  TODO
+	u32 paddingTop;
+	u32 paddingBottom;
+	u32 paddingLeftRight;
+	u32 paddingBetweenRows;
+	u32 paddingBetweenCols;
+	u32 paddingTitleTop;
+	u32 titleHeight;
+	u32 rowLength;  // how many icons before next row is started
 	// Blacklist
 	struct identifier {
 		u16 *filename;          // Filename without file extension, ex. "explorer". Can be null.
@@ -669,6 +678,14 @@ static struct config Config = { // cmdtab settings
 	.switcherVertMargin      =  32,
 	.iconWidth               =  64,
 	.iconHorzPadding         =   8,
+	.paddingTop              =  20,
+	.paddingBottom           =  20,
+	.paddingLeftRight        =   8,
+	.paddingBetweenRows      =   8,
+	.paddingBetweenCols      =   8,
+	.paddingTitleTop         =   4,
+	.titleHeight             =  20,
+	.rowLength               =   6,
 	// Blacklist
 	.blacklist = {
 		{ null,                       L"ApplicationFrameWindow" },
@@ -711,6 +728,14 @@ static void LoadConfigFromIni(void)
     Config.switcherVertMargin = GetPrivateProfileIntW(L"Appearance", L"switcherVertMargin", Config.switcherVertMargin, iniPath);
     Config.iconWidth = GetPrivateProfileIntW(L"Appearance", L"iconWidth", Config.iconWidth, iniPath);
     Config.iconHorzPadding = GetPrivateProfileIntW(L"Appearance", L"iconHorzPadding", Config.iconHorzPadding, iniPath);
+	Config.paddingTop = GetPrivateProfileIntW(L"Appearance", L"paddingTop", Config.paddingTop, iniPath);
+	Config.paddingBottom = GetPrivateProfileIntW(L"Appearance", L"paddingBottom", Config.paddingBottom, iniPath);
+	Config.paddingLeftRight = GetPrivateProfileIntW(L"Appearance", L"paddingLeftRight", Config.paddingLeftRight, iniPath);
+	Config.paddingBetweenRows = GetPrivateProfileIntW(L"Appearance", L"paddingBetweenRows", Config.paddingBetweenRows, iniPath);
+	Config.paddingBetweenCols = GetPrivateProfileIntW(L"Appearance", L"paddingBetweenCols", Config.paddingBetweenCols, iniPath);
+	Config.paddingTitleTop = GetPrivateProfileIntW(L"Appearance", L"paddingTitleTop", Config.paddingTitleTop, iniPath);
+	Config.titleHeight = GetPrivateProfileIntW(L"Appearance", L"titleHeight", Config.titleHeight, iniPath);
+	Config.rowLength = GetPrivateProfileIntW(L"Appearance", L"rowLength", Config.rowLength, iniPath);
 
     // Read hotkey settings (scan codes)
     Config.hotkeyForApps.mod = GetPrivateProfileIntW(L"Hotkeys", L"appsModifier", 0x38, iniPath);
