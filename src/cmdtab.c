@@ -598,7 +598,7 @@ static void TerminateWindowProcess(handle hwnd)
 // cmdtab impl
 //==============================================================================
 
-struct config {
+struct config {  // for explanations see cmdtab.ini
 	// Hotkeys
 	struct { u32 mod, key; } hotkeyForApps;
 	struct { u32 mod, key; } hotkeyForWindows;
@@ -609,7 +609,8 @@ struct config {
 	bool fastSwitchingForWindows;
 	bool showSwitcherForApps;
 	bool showSwitcherForWindows;
-	bool showAllWindows;  // collapse two navigation levels (apps, windows) into one
+	bool showAllWindows;
+	bool showAllTitles;
 	bool wrapbump;
 	bool restoreOnCancel;
 	// Appearance
@@ -670,6 +671,7 @@ static struct config Config = { // cmdtab settings
 	.showSwitcherForApps     = true,
 	.showSwitcherForWindows  = false,
 	.showAllWindows          = false,
+	.showAllTitles           = false,
 	.wrapbump                = true,
 	.restoreOnCancel         = false,
 	// Appearance
@@ -716,6 +718,7 @@ static void LoadConfigFromIni(void)
     Config.showSwitcherForApps = GetPrivateProfileIntW(L"Behavior", L"showSwitcherForApps", Config.showSwitcherForApps, iniPath);
     Config.showSwitcherForWindows = GetPrivateProfileIntW(L"Behavior", L"showSwitcherForWindows", Config.showSwitcherForWindows, iniPath);
     Config.showAllWindows = GetPrivateProfileIntW(L"Behavior", L"showAllWindows", Config.showAllWindows, iniPath);
+    Config.showAllTitles = GetPrivateProfileIntW(L"Behavior", L"showAllTitles", Config.showAllTitles, iniPath);
     Config.wrapbump = GetPrivateProfileIntW(L"Behavior", L"wrapbump", Config.wrapbump, iniPath);
     Config.restoreOnCancel = GetPrivateProfileIntW(L"Behavior", L"restoreOnCancel", Config.restoreOnCancel, iniPath);
 
@@ -1191,8 +1194,10 @@ static void RedrawSwitcher(void)
 			textBottom,
 		};
 		if (app != SelectedApp) {
-			DrawTextW(DrawingContext, app->name.text, app->name.length, &textRect,
-				DT_CENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+			if (Config.showAllTitles) {
+				DrawTextW(DrawingContext, app->name.text, app->name.length, &textRect,
+					DT_CENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+			}
 		} else {
 			selectedAppTextRect = textRect;
 		}
