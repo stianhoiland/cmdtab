@@ -673,7 +673,7 @@ static struct config Config = { // cmdtab settings
 	.darkmode                = false,
 	.iconWidth               =  64,
 	.paddingTop              =  48,
-	.paddingBottom           =  48,
+	.paddingBottom           =  32,
 	.paddingLeftRight        =  48,
 	.paddingBetweenRows      =  16,
 	.paddingBetweenCols      =  32,
@@ -1160,8 +1160,7 @@ static void RedrawSwitcher(void)
 		i32 iconX = Config.paddingLeftRight +
 			col * (Config.iconWidth + Config.paddingBetweenCols);
 		i32 iconY = Config.paddingTop +
-			row * (Config.iconWidth + Config.paddingTitleTop + Config.titleHeight) +
-			(row-1) * Config.paddingBetweenRows;
+			row * (Config.iconWidth + Config.paddingTitleTop + Config.titleHeight + Config.paddingBetweenRows);
 
 		// Perhaps draw selection rectangle
 		if (app == SelectedApp) {
