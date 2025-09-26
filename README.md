@@ -1,5 +1,5 @@
 # cmdtab
-Fast and lightweight macOS-style Alt-Tab app/window switcher replacement for Windows, written in the Lord's language, C.
+Fast and lightweight macOS-style (or Windows XP style, if you want that) Alt-Tab app/window switcher replacement for Windows, written in the Lord's language, C.
 
 ![cmdtab-screenshot](https://github.com/stianhoiland/cmdtab/assets/2081712/ec5d0d61-005f-4123-b191-8d5b49d1f7db)
 
@@ -76,12 +76,12 @@ These instructions require `git`, `cmake`, and *Visual Studio* or *MSBuild*.
 
 ## Release history
 
-#### 1.6.0 (2025-09-25)
+#### 1.6.0 (2025-09-26)
 
-- introduce `showAllWindows`` setting to show windows (not apps) at the top level
-- introduce `rowLength` to show the resulting longer lists of icons in multiple rows
-- show abbreviated titles of all apps (or windows) and full title of selected one
-- introduce reading config settings from `cmdtab.ini` file in the executable's directory
+- `showAllWindows` setting: show windows (not apps) at the top level
+- `rowLength` setting: show the resulting longer lists of icons in multiple rows
+- `showAllTitles` setting: show abbreviated titles of all apps (or windows) and full title of selected one
+- `cmdtab.ini` file: read config settings from file in the executable's directory
 
 #### 1.5.1 (2024-12-12)
 
