@@ -615,12 +615,7 @@ struct config {  // for explanations see cmdtab.ini
 	bool restoreOnCancel;
 	// Appearance
 	bool darkmode;
-	u32 switcherHeight;
-	u32 switcherHorzMargin;
-	u32 switcherVertMargin;
 	u32 iconWidth;
-	u32 iconHorzPadding;
-	// New padding options (before rowLength)  TODO
 	u32 paddingTop;
 	u32 paddingBottom;
 	u32 paddingLeftRight;
@@ -684,7 +679,7 @@ static struct config Config = { // cmdtab settings
 	.paddingBetweenCols      =  32,
 	.paddingTitleTop         =  16,
 	.titleHeight             =  16,
-	.rowLength               =   8,
+	.rowLength               =  20,
 	// Blacklist
 	.blacklist = {
 		{ null,                       L"ApplicationFrameWindow" },
@@ -723,11 +718,7 @@ static void LoadConfigFromIni(void)
     Config.restoreOnCancel = GetPrivateProfileIntW(L"Behavior", L"restoreOnCancel", Config.restoreOnCancel, iniPath);
 
     // Read appearance settings
-    Config.switcherHeight = GetPrivateProfileIntW(L"Appearance", L"switcherHeight", Config.switcherHeight, iniPath);
-    Config.switcherHorzMargin = GetPrivateProfileIntW(L"Appearance", L"switcherHorzMargin", Config.switcherHorzMargin, iniPath);
-    Config.switcherVertMargin = GetPrivateProfileIntW(L"Appearance", L"switcherVertMargin", Config.switcherVertMargin, iniPath);
     Config.iconWidth = GetPrivateProfileIntW(L"Appearance", L"iconWidth", Config.iconWidth, iniPath);
-    Config.iconHorzPadding = GetPrivateProfileIntW(L"Appearance", L"iconHorzPadding", Config.iconHorzPadding, iniPath);
 	Config.paddingTop = GetPrivateProfileIntW(L"Appearance", L"paddingTop", Config.paddingTop, iniPath);
 	Config.paddingBottom = GetPrivateProfileIntW(L"Appearance", L"paddingBottom", Config.paddingBottom, iniPath);
 	Config.paddingLeftRight = GetPrivateProfileIntW(L"Appearance", L"paddingLeftRight", Config.paddingLeftRight, iniPath);
