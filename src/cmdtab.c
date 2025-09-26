@@ -82,7 +82,7 @@ static const string UWPAppHostClass    = string(L"ApplicationFrameWindow");
 static const string UWPCoreWindowClass = string(L"Windows.UI.Core.CoreWindow");
 static const string UWPAppsPath        = string(L"C:\\Program Files\\WindowsApps");
 
-static bool StringsAreEqual(string *s1, string *s2)
+static bool StringsAreEqual(const string *s1, const string *s2)
 {
 	// Reverse compare strings
 	// Compare in reverse since this function is mostly used to compare file
@@ -424,6 +424,36 @@ static handle GetAppIcon(string *filepath)
 	return icon; // Caller is responsible for calling DestroyIcon
 }
 
+static handle GetWindowIcon(handle hwnd)
+{
+	// Get the window's specific icon (largest available)
+	HICON icon = (HICON)SendMessageW(hwnd, WM_GETICON, ICON_BIG, 0);
+	if (!icon) {
+		icon = (HICON)SendMessageW(hwnd, WM_GETICON, ICON_SMALL2, 0);
+	}
+	if (!icon) {
+		icon = (HICON)SendMessageW(hwnd, WM_GETICON, ICON_SMALL, 0);
+	}
+	// Else fall back to class icon
+	if (!icon) {
+		icon = (HICON)GetClassLongPtrW(hwnd, GCLP_HICON);
+	}
+	if (!icon) {
+		icon = (HICON)GetClassLongPtrW(hwnd, GCLP_HICONSM);
+	}
+	// Return icon if we found one
+	if (icon) {
+		return CopyIcon(icon);  // we don't own the original
+	}
+	// Else fall back to app icon from executable
+	string filepath = GetExePath(hwnd);
+	if (filepath.ok) {
+		return GetAppIcon(&filepath);
+	}
+    // Else give up
+	return null;
+}
+
 static bool IsDarkModeEnabled(void)
 {
 	ULONG value;
@@ -568,7 +598,7 @@ static void TerminateWindowProcess(handle hwnd)
 // cmdtab impl
 //==============================================================================
 
-struct config {
+struct config {  // for explanations see cmdtab.ini
 	// Hotkeys
 	struct { u32 mod, key; } hotkeyForApps;
 	struct { u32 mod, key; } hotkeyForWindows;
@@ -579,15 +609,21 @@ struct config {
 	bool fastSwitchingForWindows;
 	bool showSwitcherForApps;
 	bool showSwitcherForWindows;
+	bool showAllWindows;
+	bool showAllTitles;
 	bool wrapbump;
 	bool restoreOnCancel;
 	// Appearance
 	bool darkmode;
-	u32 switcherHeight;
-	u32 switcherHorzMargin;
-	u32 switcherVertMargin;
 	u32 iconWidth;
-	u32 iconHorzPadding;
+	u32 paddingTop;
+	u32 paddingBottom;
+	u32 paddingLeftRight;
+	u32 paddingBetweenRows;
+	u32 paddingBetweenCols;
+	u32 paddingTitleTop;
+	u32 titleHeight;
+	u32 rowLength;  // how many icons before next row is started
 	// Blacklist
 	struct identifier {
 		u16 *filename;          // Filename without file extension, ex. "explorer". Can be null.
@@ -616,6 +652,7 @@ static handle DrawingBitmap;    // Off-screen bitmap used for double-buffered dr
 static RECT DrawingRect;        // Size of the off-screen bitmap.
 static u16 Keyboard[16];        // 256 bits to track key repeat for low-level keyboard hook.
 static i32 MouseX, MouseY;      // Mouse position, for highlighting and clicking app icons.
+static u32 Width, Height;       // Size of the switcher window.
 
 static struct config Config = { // cmdtab settings
 	// Hotkeys
@@ -628,15 +665,21 @@ static struct config Config = { // cmdtab settings
 	.fastSwitchingForWindows = true,
 	.showSwitcherForApps     = true,
 	.showSwitcherForWindows  = false,
+	.showAllWindows          = false,
+	.showAllTitles           = false,
 	.wrapbump                = true,
 	.restoreOnCancel         = false,
 	// Appearance
 	.darkmode                = false,
-	.switcherHeight          = 128,
-	.switcherHorzMargin      =  24,
-	.switcherVertMargin      =  32,
 	.iconWidth               =  64,
-	.iconHorzPadding         =   8,
+	.paddingTop              =  48,
+	.paddingBottom           =  32,
+	.paddingLeftRight        =  48,
+	.paddingBetweenRows      =  16,
+	.paddingBetweenCols      =  32,
+	.paddingTitleTop         =  16,
+	.titleHeight             =  16,
+	.rowLength               =  20,
 	// Blacklist
 	.blacklist = {
 		{ null,                       L"ApplicationFrameWindow" },
@@ -645,8 +688,57 @@ static struct config Config = { // cmdtab settings
 	},
 };
 
+static void LoadConfigFromIni(void)
+{
+    u16 iniPath[MAX_PATH];
+
+    // Get the directory of the executable
+    GetModuleFileNameW(null, iniPath, countof(iniPath));
+    PathCchRemoveFileSpec(iniPath, countof(iniPath));
+    PathCchAppend(iniPath, countof(iniPath), L"cmdtab.ini");
+
+    // Check if INI file exists
+    if (GetFileAttributesW(iniPath) == INVALID_FILE_ATTRIBUTES) {
+        Print(L"No cmdtab.ini found, using default config\n");
+        return;
+    }
+
+    Print(L"Loading config from: %s\n", iniPath);
+
+    // Read behavior settings
+    Config.switchApps = GetPrivateProfileIntW(L"Behavior", L"switchApps", Config.switchApps, iniPath);
+    Config.switchWindows = GetPrivateProfileIntW(L"Behavior", L"switchWindows", Config.switchWindows, iniPath);
+    Config.fastSwitchingForApps = GetPrivateProfileIntW(L"Behavior", L"fastSwitchingForApps", Config.fastSwitchingForApps, iniPath);
+    Config.fastSwitchingForWindows = GetPrivateProfileIntW(L"Behavior", L"fastSwitchingForWindows", Config.fastSwitchingForWindows, iniPath);
+    Config.showSwitcherForApps = GetPrivateProfileIntW(L"Behavior", L"showSwitcherForApps", Config.showSwitcherForApps, iniPath);
+    Config.showSwitcherForWindows = GetPrivateProfileIntW(L"Behavior", L"showSwitcherForWindows", Config.showSwitcherForWindows, iniPath);
+    Config.showAllWindows = GetPrivateProfileIntW(L"Behavior", L"showAllWindows", Config.showAllWindows, iniPath);
+    Config.showAllTitles = GetPrivateProfileIntW(L"Behavior", L"showAllTitles", Config.showAllTitles, iniPath);
+    Config.wrapbump = GetPrivateProfileIntW(L"Behavior", L"wrapbump", Config.wrapbump, iniPath);
+    Config.restoreOnCancel = GetPrivateProfileIntW(L"Behavior", L"restoreOnCancel", Config.restoreOnCancel, iniPath);
+
+    // Read appearance settings
+    Config.iconWidth = GetPrivateProfileIntW(L"Appearance", L"iconWidth", Config.iconWidth, iniPath);
+	Config.paddingTop = GetPrivateProfileIntW(L"Appearance", L"paddingTop", Config.paddingTop, iniPath);
+	Config.paddingBottom = GetPrivateProfileIntW(L"Appearance", L"paddingBottom", Config.paddingBottom, iniPath);
+	Config.paddingLeftRight = GetPrivateProfileIntW(L"Appearance", L"paddingLeftRight", Config.paddingLeftRight, iniPath);
+	Config.paddingBetweenRows = GetPrivateProfileIntW(L"Appearance", L"paddingBetweenRows", Config.paddingBetweenRows, iniPath);
+	Config.paddingBetweenCols = GetPrivateProfileIntW(L"Appearance", L"paddingBetweenCols", Config.paddingBetweenCols, iniPath);
+	Config.paddingTitleTop = GetPrivateProfileIntW(L"Appearance", L"paddingTitleTop", Config.paddingTitleTop, iniPath);
+	Config.titleHeight = GetPrivateProfileIntW(L"Appearance", L"titleHeight", Config.titleHeight, iniPath);
+	Config.rowLength = GetPrivateProfileIntW(L"Appearance", L"rowLength", Config.rowLength, iniPath);
+
+    // Read hotkey settings (scan codes)
+    Config.hotkeyForApps.mod = GetPrivateProfileIntW(L"Hotkeys", L"appsModifier", 0x38, iniPath);
+    Config.hotkeyForApps.key = GetPrivateProfileIntW(L"Hotkeys", L"appsKey", 0x0F, iniPath);
+    Config.hotkeyForWindows.mod = GetPrivateProfileIntW(L"Hotkeys", L"windowsModifier", 0x38, iniPath);
+    Config.hotkeyForWindows.key = GetPrivateProfileIntW(L"Hotkeys", L"windowsKey", 0x29, iniPath);
+}
+
 static void InitConfig(void)
 {
+	// Starting point are the hardcoded defaults in 'Config' struct initializer
+	LoadConfigFromIni();
 	// Initialize runtime-dependent settings, like those dependent on user's current kbd layout
 	// The default key2 is scan code 0x29 (hex) / 41 (decimal)
 	// This is the key that is physically below Esc, left of 1 and above Tab
@@ -762,6 +854,59 @@ static void AddToHistory(handle hwnd) {
 	PrintWindowX(hwnd);
 }
 
+static bool AddAppOrCollectWindow(handle hwnd, string filepath) {
+	// 5. Find existing app with same module filepath
+	struct app *app = null;
+	for (int i = 0; i < AppsCount; i++) {
+		if (StringsAreEqual(&filepath, &Apps[i].path)) {
+			app = &Apps[i];
+			break;
+		}
+	}
+	// 6. If app not already tracked, create new app entry
+	if (!app) {
+		if (AppsCount >= countof(Apps)) {
+			Error(Switcher, L"ERROR reached max. apps\n");
+			return true;
+		}
+		// Since I reset by truncating (setting AppsCount to 0), make sure to overwrite all struct fields when reusing array slots
+		app = &Apps[AppsCount++];
+		if (app->icon) DestroyIcon(app->icon); // In fact, I have to do a little lazy cleanup
+		app->path = filepath;
+		app->name = GetAppName(&filepath);
+		app->icon = GetAppIcon(&filepath);
+		app->windowsCount = 0; // Same truncation trick here (but hwnds are not structs, so no fields to overwrite)
+	}
+	if (app->windowsCount >= countof(app->windows)) {
+		Error(Switcher, L"ERROR reached max. windows for app\n");
+		return true;
+	}
+	// 7. Add window to app's window list
+	app->windows[app->windowsCount++] = hwnd;
+	Print(L"add window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
+	PrintWindowX(hwnd);
+	return false;
+}
+
+static void AddWindowLikeAnApp(handle hwnd, string filepath) {
+	// 5. Create one pseudo-"app" entry per window
+	if (AppsCount >= countof(Apps)) {
+		Error(Switcher, L"ERROR reached max. windows\n");
+		return;
+	}
+	struct app *windowEntry = &Apps[AppsCount++];
+	if (windowEntry->icon) DestroyIcon(windowEntry->icon);
+
+	windowEntry->path = filepath;
+	windowEntry->name = GetWindowTitle(hwnd); // Use window title instead of app name
+	if (!windowEntry->name.ok || windowEntry->name.length == 0) {
+		windowEntry->name = GetAppName(&filepath); // Fallback to app name
+	}
+	windowEntry->icon = GetWindowIcon(hwnd);
+	windowEntry->windowsCount = 1;
+	windowEntry->windows[0] = hwnd;
+}
+
 static void AddToSwitcher(handle hwnd)
 {
 	// 1. Get hosted window in case of UWP host
@@ -787,36 +932,11 @@ static void AddToSwitcher(handle hwnd)
 		PrintWindowX(hwnd);
 		return;
 	}
-	// 5. Find existing app with same module filepath
-	struct app *app = null;
-	for (int i = 0; i < AppsCount; i++) {
-		if (StringsAreEqual(&filepath, &Apps[i].path)) {
-			app = &Apps[i];
-			break;
-		}
+	if (Config.showAllWindows) {
+		AddWindowLikeAnApp(hwnd, filepath);
+	} else {
+		AddAppOrCollectWindow(hwnd, filepath);
 	}
-	// 6. If app not already tracked, create new app entry
-	if (!app) {
-		if (AppsCount >= countof(Apps)) {
-			Error(Switcher, L"ERROR reached max. apps\n");
-			return;
-		}
-		// Since I reset by truncating (setting AppsCount to 0), make sure to overwrite all struct fields when reusing array slots
-		app = &Apps[AppsCount++];
-		if (app->icon) DestroyIcon(app->icon); // In fact, I have to do a little lazy cleanup
-		app->path = filepath;
-		app->name = GetAppName(&filepath);
-		app->icon = GetAppIcon(&filepath);
-		app->windowsCount = 0; // Same truncation trick here (but hwnds are not structs, so no fields to overwrite)
-	}
-	if (app->windowsCount >= countof(app->windows)) {
-		Error(Switcher, L"ERROR reached max. windows for app\n");
-		return;
-	}
-	// 7. Add window to app's window list
-	app->windows[app->windowsCount++] = hwnd;
-	Print(L"add window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
-	PrintWindowX(hwnd);
 }
 
 static void ActivateWindow(handle hwnd)
@@ -942,19 +1062,24 @@ static void ResizeSwitcher(void)
 	MONITORINFO mi = { .cbSize = sizeof(MONITORINFO) };
 	GetMonitorInfoW(MonitorFromPoint(mousePos, MONITOR_DEFAULTTONEAREST), &mi);
 
-	u32   iconsWidth = AppsCount * Config.iconWidth;
-	u32 paddingWidth = AppsCount * Config.iconHorzPadding * 2;
-	u32  marginWidth =         2 * Config.switcherHorzMargin;
+	// Calculate rows and columns
+	u32 rows = (AppsCount + Config.rowLength - 1) / Config.rowLength; // Ceiling division
+	u32 cols = AppsCount < Config.rowLength ? AppsCount : Config.rowLength;
 
-	u32 w = iconsWidth + paddingWidth + marginWidth;
-	u32 h = Config.switcherHeight;
-	i32 x = mi.rcMonitor.left + (mi.rcMonitor.right - mi.rcMonitor.left - w) / 2;
-	i32 y = mi.rcMonitor.top + (mi.rcMonitor.bottom - mi.rcMonitor.top - h) / 2;
+	u32   iconsWidth = cols * Config.iconWidth;
+	u32 paddingWidth = 2 * Config.paddingLeftRight + (cols-1) * Config.paddingBetweenCols;
+	u32  iconsHeight = rows * (Config.iconWidth + Config.paddingTitleTop + Config.titleHeight);
+	u32 paddingHeight = Config.paddingTop + (rows-1) * Config.paddingBetweenRows + Config.paddingBottom;
 
-	MoveWindow(Switcher, x, y, w, h, false); // Yes, "MoveWindow" means "ResizeWindow"
+	Width = iconsWidth + paddingWidth;
+	Height = iconsHeight + paddingHeight;
+	i32 x = mi.rcMonitor.left + (mi.rcMonitor.right - mi.rcMonitor.left - Width) / 2;
+	i32 y = mi.rcMonitor.top + (mi.rcMonitor.bottom - mi.rcMonitor.top - Height) / 2;
+
+	MoveWindow(Switcher, x, y, Width, Height, false);
 
 	// Resize off-screen double-buffering bitmap
-	RECT resized = {x, y, x+w, y+h};
+	RECT resized = {x, y, x+Width, y+Height};
 	if (!EqualRect(&DrawingRect, &resized)) {
 		handle context = GetDC(Switcher);
 		DeleteObject(DrawingBitmap);
@@ -970,6 +1095,7 @@ static void ResizeSwitcher(void)
 
 static void RedrawSwitcher(void)
 {
+	// relies on global vars set by ResizeSwitcher()
 	// TODO Use 'Config.style'
 
 	#define BACKGROUND   RGB(32, 32, 32) // dark mode?
@@ -1022,71 +1148,74 @@ static void RedrawSwitcher(void)
 	//DeleteObject(oldPen);
 	//DeleteObject(oldBrush);
 	//DeleteObject(oldFont);
-
+	RECT selectedAppTextRect;
 	for (int i = 0; i < AppsCount; i++) {
 		struct app *app = &Apps[i];
 
-		// Special-case math for index 0
-		i32  left0 = i == 0 ? ICON_PAD : 0;
-		i32 right0 = i != 0 ? ICON_PAD : 0;
+		// Calculate row and column for this icon
+		u32 row = i / Config.rowLength;
+		u32 col = i % Config.rowLength;
 
-		i32  icons = (ICON_PAD + ICON_WIDTH + ICON_PAD) * i;
-		i32   left = HORZ_PAD + left0 + icons + right0;
-		i32    top = VERT_PAD;
-		i32  width = ICON_WIDTH;
-		i32 height = ICON_WIDTH;
-		i32  right = left + width;
-		i32 bottom = top + height;
+		// Calculate position based on row/column
+		i32 iconX = Config.paddingLeftRight +
+			col * (Config.iconWidth + Config.paddingBetweenCols);
+		i32 iconY = Config.paddingTop +
+			row * (Config.iconWidth + Config.paddingTitleTop + Config.titleHeight + Config.paddingBetweenRows);
 
-		//RECT icon_rect = (RECT){left, top, right, bottom};
-		//bool app_is_mouseover = PtInRect(&icon_rect, (POINT){MouseX, MouseY});
-		//print(L"mouse %s\n", app_is_mouseover ? L"over" : L"not over");
+		// Perhaps draw selection rectangle
+		if (app == SelectedApp) {
+			i32 selX = iconX - SEL_HORZ_OFF;
+			i32 selY = iconY - SEL_VERT_OFF;
+			i32 selW = Config.iconWidth + SEL_HORZ_OFF * 2;
+			i32 selH = Config.iconWidth + SEL_VERT_OFF * 2;
+			RoundRect(DrawingContext, selX, selY, selX + selW, selY + selH, SEL_RADIUS, SEL_RADIUS);
+		}
 
+		// Draw app icon and title
+		if (app->icon) {
+			DrawIconEx(DrawingContext, iconX, iconY, app->icon, Config.iconWidth, Config.iconWidth, 0, null, DI_NORMAL);
+		}
+		i32 textTop = iconY + Config.iconWidth + Config.paddingTitleTop;
+		i32 textBottom = textTop + Config.titleHeight;
+		RECT textRect = {
+			iconX,
+			textTop,
+			iconX + Config.iconWidth,
+			textBottom,
+		};
 		if (app != SelectedApp) {
-			// Draw only icon, with window background
-			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, windowBackground, DI_NORMAL);
+			if (Config.showAllTitles) {
+				DrawTextW(DrawingContext, app->name.text, app->name.length, &textRect,
+					DT_CENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+			}
 		} else {
-			// Draw selection rectangle and icon, with selection background
-			RoundRect(DrawingContext, left - SEL_VERT_OFF, top - SEL_HORZ_OFF, right + SEL_VERT_OFF, bottom + SEL_HORZ_OFF, SEL_RADIUS, SEL_RADIUS);
-			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, selectionBackground, DI_NORMAL);
-
-			// Draw app name
-			u16 *title = app->name.text;
-
-			// Measure text width
-			RECT testRect = {0};
-			DrawTextW(DrawingContext, title, -1, &testRect, DT_CALCRECT | DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
-			i32 textWidth = (testRect.right - testRect.left) + 2; // Hmm, measured size seems a teensy bit too small, so +2
-
-			// DrawTextW uses a destination rect for drawing
-			RECT textRect = {0};
-			textRect.left = left;
-			textRect.right = right;
-			textRect.bottom = rect.bottom;
-
-			i32 widthDiff = textWidth - (textRect.right - textRect.left);
-			if (widthDiff > 0) {
-				// textRect is too small for text, grow the rect
-				textRect.left -= (i32)ceil(widthDiff / 2.0);
-				textRect.right += (i32)floor(widthDiff / 2.0);
-			}
-
-			textRect.bottom -= ICON_PAD; // *** this lifts the app text up a little ***
-
-			// If the app name, when centered, extends past window bounds, adjust label position to be inside window bounds
-			if (textRect.right > rect.right) {
-				textRect.left -= (textRect.right - rect.right) + ICON_PAD;
-				textRect.right = rect.right - ICON_PAD;
-			}
-			if (textRect.left < 0) {
-				textRect.right += ICON_PAD + abs(textRect.left);
-				textRect.left   = ICON_PAD + 0;
-			}
-
-			///* dbg */ FillRect(DrawingContext, &textRect, CreateSolidBrush(RGB(255, 0, 0))); // Check the size of the text box
-			DrawTextW(DrawingContext, title, -1, &textRect, DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
+			selectedAppTextRect = textRect;
 		}
 	}
+	// draw full title for selected app
+	RECT testRect = {0};
+	DrawTextW(DrawingContext, SelectedApp->name.text, SelectedApp->name.length, &testRect,
+		DT_CALCRECT | DT_SINGLELINE | DT_CENTER);  // measure text width
+	i32 textWidth = (testRect.right - testRect.left) + 2 * Config.paddingBetweenCols;
+	i32 widthDiff = textWidth - (selectedAppTextRect.right - selectedAppTextRect.left);
+	if (widthDiff > 0) {
+		// textRect is too small for text, grow the rect
+		selectedAppTextRect.left -= (i32)ceil(widthDiff / 2.0);
+		selectedAppTextRect.right += (i32)floor(widthDiff / 2.0);
+	}
+	// If the app name, when centered, extends past window bounds, adjust label position to be inside window bounds
+	if (selectedAppTextRect.right > Width) {
+		selectedAppTextRect.left -= (selectedAppTextRect.right - Width);
+		selectedAppTextRect.right = Width;
+	}
+	if (selectedAppTextRect.left < 0) {
+		selectedAppTextRect.left   = Config.paddingBetweenCols;
+	}
+	FillRect(DrawingContext, &selectedAppTextRect, CreateSolidBrush(BACKGROUND)); // Make room
+	SetTextColor(DrawingContext, HIGHLIGHT);
+	// SetBkMode(DrawingContext, OPAQUE);
+	DrawTextW(DrawingContext, SelectedApp->name.text, SelectedApp->name.length, &selectedAppTextRect,
+		DT_CENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 }
 
 static void ShowSwitcher(void)
