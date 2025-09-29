@@ -56,7 +56,7 @@ There's no installation. Just download the [latest version](https://github.com/s
 
 It makes sense to have **cmdtab** "Run as administrator", and it makes sense to have **cmdtab** autorun on login. Doing either is easy, but doing both, i.e. autorun as admin, is not so easy. The only way to autorun as admin is to use the Windows Task Scheduler. To create an appropriate scheduled task from the Command Prompt run this command:
 ```console
-schtasks /create /sc onlogon /rl highest /tn "cmdtab elevated autorun" /tr "C:\Users\<YOUR_USER_NAME>\Downloads\cmdtab-v1.5.1-win-x86_64\cmdtab.exe --autorun"
+schtasks /create /sc onlogon /rl highest /tn "cmdtab elevated autorun" /tr "C:\Users\<YOUR_USER_NAME>\Downloads\cmdtab-v1.6-win-x86_64\cmdtab.exe --autorun"
 ```
 You can further customize the scheduled task created by that command by running `taskschd.msc`.
 
