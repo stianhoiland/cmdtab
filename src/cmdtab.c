@@ -1,4 +1,4 @@
-﻿#include <math.h>
+#include <math.h>
 
 #define UNICODE
 #define _UNICODE
@@ -33,20 +33,22 @@
 #define NOMCX
 
 #include <windows.h>
-#include "crtdbg.h"
-#include "shellapi.h" // Only used by StringFileName for PathFindFileNameW?
-#include "shlwapi.h"
-#include "dwmapi.h"
-#include "pathcch.h"
-#include "strsafe.h"
+#include <crtdbg.h>
+#include <shellapi.h> // Only used by StringFileName for PathFindFileNameW?
+#include <shlwapi.h>
+#include <dwmapi.h>
+#include <pathcch.h>
+#include <strsafe.h>
 #include <initguid.h>
-#include "commoncontrols.h"
+#include <commoncontrols.h>
+#include <mmsystem.h> // PlaySound
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "shlwapi.lib") // Only used by StringFileName for PathFindFileNameW?
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "pathcch.lib")
 #pragma comment(lib, "version.lib")
+#pragma comment(lib, "winmm.lib") // PlaySound
 
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='amd64' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
@@ -130,19 +132,6 @@ static i64 FinishMeasuring(i64 start)
 	return ((end - start) * 1000) / frequency;
 }
 
-static void Debug(u16 *fmt, ...)
-{
-	#ifdef _DEBUG
-	u16 buffer[2048];
-	va_list args;
-	va_start(args, fmt);
-	StringCchVPrintfW(buffer, countof(buffer)-1, fmt, args);
-	va_end(args);
-	OutputDebugStringW(buffer);
-	__debugbreak();
-	#endif
-}
-
 static void Print(u16 *fmt, ...)
 {
 	#ifdef _DEBUG
@@ -151,7 +140,11 @@ static void Print(u16 *fmt, ...)
 	va_start(args, fmt);
 	StringCchVPrintfW(buffer, countof(buffer)-1, fmt, args);
 	va_end(args);
-	OutputDebugStringW(buffer);
+	#ifdef _MSC_VER
+	  OutputDebugStringW(buffer);
+	#else
+	  fputws(buffer, stdout);
+	#endif
 	#endif
 }
 
@@ -162,7 +155,11 @@ static void Log(u16 *fmt, ...)
 	va_start(args, fmt);
 	StringCchVPrintfW(buffer, countof(buffer)-1, fmt, args);
 	va_end(args);
-	OutputDebugStringW(buffer);
+	#ifdef _MSC_VER
+	  OutputDebugStringW(buffer);
+	#else
+	  fputws(buffer, stdout);
+	#endif
 }
 
 static void Error(handle hwnd, u16 *fmt, ...)
@@ -172,8 +169,12 @@ static void Error(handle hwnd, u16 *fmt, ...)
 	va_start(args, fmt);
 	StringCchVPrintfW(buffer, countof(buffer)-1, fmt, args);
 	va_end(args);
-	OutputDebugStringW(buffer);
-	SetForegroundWindow(hwnd);
+	#ifdef _MSC_VER
+	  OutputDebugStringW(buffer);
+	#else
+	  fputws(buffer, stdout);
+	#endif
+	SetForegroundWindow(GetLastActivePopup(hwnd));
 	MessageBoxW(hwnd, buffer, L"cmdtab", MB_OK | MB_ICONERROR | MB_TASKMODAL);
 }
 
@@ -184,7 +185,7 @@ static bool Ask(handle hwnd, u16 *fmt, ...)
 	va_start(args, fmt);
 	StringCchVPrintfW(buffer, countof(buffer)-1, fmt, args);
 	va_end(args);
-	SetForegroundWindow(hwnd);
+	SetForegroundWindow(GetLastActivePopup(hwnd));
 	return MessageBoxW(hwnd, buffer, L"cmdtab", MB_YESNO | MB_ICONQUESTION | MB_TASKMODAL) == IDYES;
 }
 
@@ -264,11 +265,11 @@ static string GetExePath(handle hwnd)
 	ULONG length = countof(path.text);
 	path.ok = QueryFullProcessImageNameW(process, 0, path.text, &length);
 	CloseHandle(process);
-	if (!path.ok) {
+	if (path.ok) {
+		path.length = length;
+	} else {
 		Print(L"WARNING couldn't get exe path for process with pid: %u\n", pid);
-		return path;
 	}
-	path.length = length;
 	return path;
 }
 
@@ -289,7 +290,7 @@ static void PrintWindowX(handle hwnd) // PrintWindow already taken
 		string filename = StringFileName(&filepath, false);
 		string class = GetWindowClass(hwnd);
 		string title = GetWindowTitle(hwnd);
-		u16 *wsShowState        = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MINIMIZE) ? L" (minimized) " : 
+		u16 *wsShowState        = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MINIMIZE) ? L" (minimized) " :
 			(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MAXIMIZE) ? L" (maximized) " : L" ";
 		u16 *wsChild            = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD) ? L"child" : L"parent";
 		u16 *wsVisible          = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_VISIBLE) ? L", visible" : L", hidden";
@@ -321,7 +322,7 @@ static void PrintWindowX(handle hwnd) // PrintWindow already taken
 static string GetAppName(string *filepath)
 {
 	// Query version info for pretty application name. See cmdtab's own res/cmdtab.rc file for an idea of the data that is queried.
-	
+
 	string name = {0};
 
 	struct {
@@ -343,7 +344,7 @@ static string GetAppName(string *filepath)
 		u16 language;
 		u16 codepage;
 	} *translation;
-	
+
 	if (!VerQueryValueW(versionInfo.data, L"\\VarFileInfo\\Translation", (void *)&translation, null)) {
 		goto free;
 	}
@@ -386,7 +387,7 @@ static handle GetAppIcon(string *filepath)
 {
 	//IsImmersiveProcess();
 	//GetApplicationUserModelId(); // appmodel.h
-	
+
 	// From Raymond Chen: https://stackoverflow.com/a/12429114/659310
 	//
 	// Requires the following:
@@ -415,7 +416,8 @@ static handle GetAppIcon(string *filepath)
 	}
 	SHFILEINFOW info = {0};
 	if (!SHGetFileInfoW(filepath->text, 0, &info, sizeof info, SHGFI_SYSICONINDEX)) { // 2nd arg: -1, 0 or FILE_ATTRIBUTE_NORMAL
-		Debug(L"suspicious SHGetFileInfoW return"); // SHGetFileInfoW has special return with SHGFI_SYSICONINDEX flag, which I think should never fail (docs unclear?)
+		Log(L"suspicious SHGetFileInfoW return"); // SHGetFileInfoW has special return with SHGFI_SYSICONINDEX flag, which I think should never fail (docs unclear?)
+		__debugbreak();
 		return null;
 	}
 	HICON icon = {0};
@@ -472,7 +474,7 @@ static bool IsKeyDown(u32 key)
 	return (bool)(GetAsyncKeyState(key) & 0x8000);
 }
 
-static int ReportWindowHandle(handle hwnd, handle target)
+static bool ReportWindowHandle(handle hwnd, handle target)
 {
 	// Tell user the executable name and class so they can add it to the blacklist
 	string class = GetWindowClass(target);
@@ -481,26 +483,8 @@ static int ReportWindowHandle(handle hwnd, handle target)
 
 	u16 buffer[2048];
 	StringCchPrintfW(buffer, countof(buffer)-1, L"Add to blacklist?\n\nName:\t%s\nClass:\t%s\n\nPress Ctrl+C to copy this message.\n\nNote: Blacklist not working yet, it does nothing, TODO!", name.text, class.text);
-	SetForegroundWindow(hwnd);
+	SetForegroundWindow(GetLastActivePopup(hwnd));
 	return MessageBoxW(hwnd, buffer, L"cmdtab", MB_OK | MB_ICONASTERISK | MB_TASKMODAL) == IDYES;
-}
-
-static void ReceiveLastInputEvent(void)
-{
-	// Oh my, the fucking rabbit hole...
-	// This is a hack (one of many flavors) to bypass the restrictions on setting the foreground window
-	// https://github.com/microsoft/PowerToys/blob/7d0304fd06939d9f552e75be9c830db22f8ff9e2/src/modules/fancyzones/FancyZonesLib/util.cpp#L376
-	//
-	// There is also a subtle issue with the Alt-key functionality of windows with menus, where
-	// the menu selection will get stuck until the window gets an AltUp event. It doesn't seem
-	// to help to send the AltUp event globally; I think the window must receive it to reset its
-	// menu selection. But this differs from Windows' normal AltTab widget, which somehow bypasses
-	// this issue. I've confirmed that the AltTab window does something different because there are
-	// subtle observable behavior differences in the menu selection when Windows' normal AltTab is
-	// invoked vs. cmdtab. In the end, I figured out that instead of sending an AltUp event, if I
-	// just steal focus as quickly as possible upon activation, the menu selection does not get stuck,
-	// and the behavior exhibited perfectly matches Windows' normal AltTab. Success!
-	SendInput(1, &(INPUT){.type = INPUT_KEYBOARD}, sizeof(INPUT));
 }
 
 static void ShowWindowX(handle hwnd) // ShowWindow already taken
@@ -511,13 +495,14 @@ static void ShowWindowX(handle hwnd) // ShowWindow already taken
 		} else {
 			ShowWindow(hwnd, SW_SHOWNA);
 		}
-		if (SetForegroundWindow(GetAppHost(hwnd))) {
+		if (SetForegroundWindow(GetLastActivePopup(GetAppHost(hwnd)))) {
 			Print(L"switch to ");
 			PrintWindowX(hwnd);
 		} else {
+			Print(L"ERROR couldn't switch to:");
 			PrintWindowX(hwnd);
-			Error(null/*Switcher*/, L"ERROR couldn't switch to %s", GetWindowTitle(hwnd));
-			//CancelSwitcher(false);
+		    PlaySound(L"SystemHand", NULL, SND_ASYNC);
+			//CancelSwitcher(); // need forward decl
 		}
 	} else {
 		Print(L"switch to: already foreground\n");
@@ -573,6 +558,7 @@ struct config {
 	struct { u32 mod, key; } hotkeyForApps;
 	struct { u32 mod, key; } hotkeyForWindows;
 	// Behavior
+	bool askAutorun;
 	bool switchApps;
 	bool switchWindows;
 	bool fastSwitchingForApps; // TODO
@@ -580,7 +566,6 @@ struct config {
 	bool showSwitcherForApps;
 	bool showSwitcherForWindows;
 	bool wrapbump;
-	bool restoreOnCancel;
 	// Appearance
 	bool darkmode;
 	u32 switcherHeight;
@@ -603,25 +588,25 @@ struct app {
 	size windowsCount;          // Number of elements in 'windows' array.
 };
 
-static struct app Apps[128];    // Apps that are displayed in switcher.
-static size AppsCount;          // Number of elements in 'Apps' array.
-static struct app *SelectedApp; // Pointer to one of the elements in 'Apps' array. The app for the 'SelectedWindow'.
-static handle *SelectedWindow;  // Currently selected window in switcher. Non-NULL indicates switcher is active.
-static handle RestorableWindow; // Whatever window was foreground when switcher was activated. Does not need to be in filtered 'Apps' array.
-static handle History[128];     // Window activation history from Windows events. Deduplicated, so prior activations are moved to the front.
-static size HistoryCount;       // Number of elements in 'History' array.
-static handle Switcher;         // Handle for main window (i.e. switcher).
-static handle DrawingContext;   // Drawing context for double-buffered drawing of main window.
-static handle DrawingBitmap;    // Off-screen bitmap used for double-buffered drawing of main window.
-static RECT DrawingRect;        // Size of the off-screen bitmap.
-static u16 Keyboard[16];        // 256 bits to track key repeat for low-level keyboard hook.
-static i32 MouseX, MouseY;      // Mouse position, for highlighting and clicking app icons.
+static handle      History[128];   // Window activation history (MRU) from Windows events. Deduplicated, so prior activations are moved to the front.
+static size        HistoryCount;   // Number of elements in 'History' array.
+static struct app  Apps[128];      // Apps that are displayed in switcher.
+static size        AppsCount;      // Number of elements in 'Apps' array.
+static struct app *SelectedApp;    // Pointer to one of the elements in 'Apps' array. The app for the 'SelectedWindow'.
+static handle     *SelectedWindow; // Currently selected window in switcher. Non-NULL indicates switcher is active.
+static handle      Switcher;       // Handle for main window (i.e. switcher).
+static handle      DrawingContext; // Drawing context for double-buffered drawing of main window.
+static handle      DrawingBitmap;  // Off-screen bitmap used for double-buffered drawing of main window.
+static RECT        DrawingRect;    // Size of the off-screen bitmap.
+static u16         Keyboard[16];   // 256 bits to track key repeat for low-level keyboard hook.
+static i32         MouseX, MouseY; // Mouse position, for highlighting and clicking app icons in switcher.
 
 static struct config Config = { // cmdtab settings
 	// Hotkeys
 	.hotkeyForApps =    { 0x38, 0x0F }, // Alt-Tab in scancodes, must be updated during runtime, see InitConfig
 	.hotkeyForWindows = { 0x38, 0x29 }, // Alt-Tilde/Backquote in scancodes, must be updated during runtime, see InitConfig
 	// Behavior
+	.askAutorun              = true,
 	.switchApps              = true,
 	.switchWindows           = true,
 	.fastSwitchingForApps    = false,
@@ -629,7 +614,6 @@ static struct config Config = { // cmdtab settings
 	.showSwitcherForApps     = true,
 	.showSwitcherForWindows  = false,
 	.wrapbump                = true,
-	.restoreOnCancel         = false,
 	// Appearance
 	.darkmode                = false,
 	.switcherHeight          = 128,
@@ -688,6 +672,7 @@ static bool WindowIsBlacklisted(string *filename, string *windowClass)
 	// 2) {name,null}  only name is specified and must match
 	// 3) {null,class} only class is specified and must match
 	// 4) {null,null}  terminates array
+
 	for (size i = 0; i < countof(Config.blacklist); i++) {
 		struct identifier ignored = Config.blacklist[i];
 		if (ignored.filename && ignored.windowClass) {
@@ -709,14 +694,14 @@ static bool WindowIsBlacklisted(string *filename, string *windowClass)
 static void AddToHistory(handle hwnd) {
 	// Get hosted window in case of UWP host
 	hwnd = GetCoreWindow(hwnd);
-	// 
+	// Already added and first?
 	if (History[0] == hwnd) {
 		Print(L"(already first in history) ");
 		Print(L"activate window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
 		PrintWindowX(hwnd);
 		return;
 	}
-	// Potentially find 'hwnd' in activation list and shift other hwnds down to position of 'hwnd' and then put 'hwnd' first
+	// Find 'hwnd' in previous history, shift other hwnds down to position of 'hwnd', and put 'hwnd' first
 	for (int i = 1; i < HistoryCount; i++) {
 		if (History[i] == hwnd) {
 			memmove(&History[1], &History[0], sizeof History[0] * i);
@@ -725,7 +710,7 @@ static void AddToHistory(handle hwnd) {
 		}
 	}
 
-	// 'hwnd' doesn't already exist in activation list; so validate and add it
+	// 'hwnd' is not already tracked in activation history; so validate and add it
 
 	// Basic checks for eligibility in Alt-Tab
 	if (!IsAltTabWindow(hwnd)) {
@@ -737,7 +722,7 @@ static void AddToHistory(handle hwnd) {
 	// Get module filepath, abort if failed (most likely access denied)
 	string filepath = GetExePath(hwnd);
 	if (!filepath.ok) {
-		return; // Don't have to print error, since GetFilepath already does that
+		return; // Don't have to print error, since GetExePath already does that
 	}
 	// Check window against user-defined blacklist
 	string filename = StringFileName(&filepath, false);
@@ -749,14 +734,13 @@ static void AddToHistory(handle hwnd) {
 		return;
 	}
 
-	// 'hwnd' is valid and should be added
+	// 'hwnd' is valid and should be added to activation history
 
-	// Shift all hwnds down one position and then put 'hwnd' first
+	// Shift all hwnds down one position and put 'hwnd' first
 	if (HistoryCount < countof(History)) {
-		memmove(&History[1], &History[0], sizeof History[0] * ++HistoryCount);
-	} else {
-		memmove(&History[1], &History[0], sizeof History[0] * HistoryCount);
+		HistoryCount++;
 	}
+	memmove(&History[1], &History[0], sizeof History[0] * HistoryCount);
 	History[0] = hwnd;
 	Print(L"activate window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
 	PrintWindowX(hwnd);
@@ -768,15 +752,16 @@ static void AddToSwitcher(handle hwnd)
 	hwnd = GetCoreWindow(hwnd);
 	// 2. Basic checks for eligibility in Alt-Tab
 	if (!IsAltTabWindow(hwnd)) {
-		Print(L"(ignored) ");
-		Print(L"add window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
-		PrintWindowX(hwnd);
+		// These prints are very spammy since looots of windows are ignored
+		//Print(L"(ignored) ");
+		//Print(L"add window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
+		//PrintWindowX(hwnd);
 		return;
 	}
 	// 3. Get module filepath, abort if failed (most likely access denied)
 	string filepath = GetExePath(hwnd);
 	if (!filepath.ok) {
-		return; // Don't have to print error, since GetFilepath already does that
+		return; // Don't have to print error, since GetExePath already does that
 	}
 	// 4. Check window against user-defined blacklist
 	string filename = StringFileName(&filepath, false);
@@ -838,13 +823,13 @@ static void ActivateWindow(handle hwnd)
 	if (window) {
 		if (window > &app->windows[0]) { // Don't shift if already first
 			// Shift other windows down to position of 'window' and put 'window' first
-			memmove(&app->windows[1], &app->windows[0], sizeof app->windows[0] * (window - app->windows)); // i.e. index
+			memmove(&app->windows[1], &app->windows[0], sizeof app->windows[0] * (window - app->windows)); // i.e. index of 'window'
 			app->windows[0] = hwnd;
 		}
 		if (app > &Apps[0]) { // Don't shift if already first
 			// Shift other apps down to position of 'app' and put 'app' first
 			struct app temp = *app; // This is a 1.6kb copy
-			memmove(&Apps[1], &Apps[0], sizeof Apps[0] * (app - Apps)); // i.e. index
+			memmove(&Apps[1], &Apps[0], sizeof Apps[0] * (app - Apps)); // i.e. index of 'app'
 			Apps[0] = temp;
 		}
 	}
@@ -852,7 +837,7 @@ static void ActivateWindow(handle hwnd)
 
 static BOOL CALLBACK _AddToSwitcher(HWND hwnd, LPARAM lparam)
 {
-	// EnumWindowsProc used by UpdateApps: Call AddToSwitcher with every top-level window enumerated by EnumWindows
+	// EnumWindowsProc used by UpdateApps to call AddToSwitcher with every top-level window enumerated by EnumWindows
 	(*((int *)lparam))++; // Increment window counter arg
 	AddToSwitcher(hwnd);
 	return true; // Return true to continue EnumWindows
@@ -873,63 +858,73 @@ static void UpdateApps(void)
 	PrintApps();
 }
 
-static void SelectFirstWindow(void)
+static void SelectFirstApp(void)
 {
+	/*dbg*/ handle *oldWindow = SelectedWindow;
 	if (AppsCount > 0) {
 		SelectedApp = &Apps[0];
 		SelectedWindow = &Apps[0].windows[0];
-		RestorableWindow = GetForegroundWindow();
 	} else {
 		Print(L"nothing to select\n");
+		SelectedApp = null;
+		SelectedWindow = null;
+	}
+	/*dbg*/
+	if (oldWindow != SelectedWindow) {
+		Print(L"select first ");
+		PrintWindowX(*SelectedWindow);
 	}
 }
 
-static void SelectNextWindow(bool applevel, bool reverse, bool wrap)
+static void SelectNextApp(bool reverse, bool wrap)
 {
-	if (!SelectedApp || !SelectedWindow) {
-		Error(Switcher, L"invalid state: no SelectedApp or no SelectedWindow");
-		Debug(L"invalid state: no SelectedApp or no SelectedWindow");
-		return;
-	}
-	/*dbg*/struct app *oldApp = SelectedApp;
-	/*dbg*/handle *oldWindow = SelectedWindow;
-	if (applevel) {
-		struct app *firstApp = &Apps[0];
-		struct app  *lastApp = &Apps[AppsCount-1];
-		if (reverse) {
-			if (SelectedApp > firstApp) {
-				SelectedApp--;
-			} else if (wrap) {
-				SelectedApp = lastApp;
-			}
-		} else {
-			if (SelectedApp < lastApp) {
-				SelectedApp++;
-			} else if (wrap) {
-				SelectedApp = firstApp;
-			}
+	//assert(SelectedApp && SelectedWindow);
+	/*dbg*/ handle *oldWindow = SelectedWindow;
+	struct app *firstApp = &Apps[0];
+	struct app  *lastApp = &Apps[AppsCount-1];
+	if (reverse) {
+		if (SelectedApp > firstApp) {
+			SelectedApp--;
+		} else if (wrap) {
+			SelectedApp = lastApp;
 		}
-		SelectedWindow = &SelectedApp->windows[0];
 	} else {
-		handle *firstWindow = &SelectedApp->windows[0];
-		handle  *lastWindow = &SelectedApp->windows[SelectedApp->windowsCount-1];
-		if (reverse) {
-			if (SelectedWindow > firstWindow) {
-				SelectedWindow--;
-			} else if (wrap) {
-				SelectedWindow = lastWindow;
-			}
-		} else {
-			if (SelectedWindow < lastWindow) {
-				SelectedWindow++;
-			} else if (wrap) {
-				SelectedWindow = firstWindow;
-			}
+		if (SelectedApp < lastApp) {
+			SelectedApp++;
+		} else if (wrap) {
+			SelectedApp = firstApp;
+		}
+	}
+	SelectedWindow = &SelectedApp->windows[0];
+	/*dbg*/
+	if (oldWindow != SelectedWindow) {
+		Print(L"select app ");
+		PrintWindowX(*SelectedWindow);
+	}
+}
+
+static void SelectNextWindow(bool reverse, bool wrap)
+{
+	//assert(SelectedApp && SelectedWindow);
+	/*dbg*/ handle *oldWindow = SelectedWindow;
+	handle *firstWindow = &SelectedApp->windows[0];
+	handle  *lastWindow = &SelectedApp->windows[SelectedApp->windowsCount-1];
+	if (reverse) {
+		if (SelectedWindow > firstWindow) {
+			SelectedWindow--;
+		} else if (wrap) {
+			SelectedWindow = lastWindow;
+		}
+	} else {
+		if (SelectedWindow < lastWindow) {
+			SelectedWindow++;
+		} else if (wrap) {
+			SelectedWindow = firstWindow;
 		}
 	}
 	/*dbg*/
-	if (oldApp != SelectedApp || oldWindow != SelectedWindow) {
-		Print(L"select ");
+	if (oldWindow != SelectedWindow) {
+		Print(L"select window ");
 		PrintWindowX(*SelectedWindow);
 	}
 }
@@ -977,10 +972,10 @@ static void RedrawSwitcher(void)
 	#define HIGHLIGHT    RGB(76, 194, 255) // Sampled from Windows 11 Alt-Tab
 	#define HIGHLIGHT_BG RGB(11, 11, 11) // Sampled from Windows 11 Alt-Tab
 
-	#define ICON_WIDTH 64
-	#define ICON_PAD    8
-	#define HORZ_PAD   24
-	#define VERT_PAD   32
+	u32 ICON_WIDTH = 64;
+	u32 ICON_PAD   =  8;
+	u32 HORZ_PAD   = 24;
+	u32 VERT_PAD   = 32;
 
 	#define SEL_OUTLINE   3
 	#define SEL_RADIUS   10
@@ -1002,18 +997,19 @@ static void RedrawSwitcher(void)
 	selectionOutline = CreatePen(PS_SOLID, SEL_OUTLINE, (GetAccentColor() & 0x00FFFFFF)); //HIGHLIGHT); // TODO Leak?
 	//}
 
-	RECT rect = {0};
-	GetClientRect(Switcher, &rect);
+	// Window rect
+	RECT windowRect = {0};
+	GetClientRect(Switcher, &windowRect);
 
 	// Invalidate & draw window background
 	RedrawWindow(Switcher, null, null, RDW_INVALIDATE | RDW_ERASE);
-	FillRect(DrawingContext, &rect, windowBackground);
+	FillRect(DrawingContext, &windowRect, windowBackground);
 
 	// Select pen & brush for RoundRect (used to draw selection rectangle)
 	HPEN oldPen = (HPEN)SelectObject(DrawingContext, selectionOutline);
 	HBRUSH oldBrush = (HBRUSH)SelectObject(DrawingContext, selectionBackground);
 
-	// Select text font, color & background for DrawTextW (used to draw app name)
+	// Select text font, color & background for DrawTextW (used to draw title text)
 	HFONT oldFont = (HFONT)SelectObject(DrawingContext, GetStockObject(DEFAULT_GUI_FONT));
 	SetTextColor(DrawingContext, TEXT_COLOR);
 	SetBkMode(DrawingContext, TRANSPARENT);
@@ -1038,10 +1034,6 @@ static void RedrawSwitcher(void)
 		i32  right = left + width;
 		i32 bottom = top + height;
 
-		//RECT icon_rect = (RECT){left, top, right, bottom};
-		//bool app_is_mouseover = PtInRect(&icon_rect, (POINT){MouseX, MouseY});
-		//print(L"mouse %s\n", app_is_mouseover ? L"over" : L"not over");
-
 		if (app != SelectedApp) {
 			// Draw only icon, with window background
 			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, windowBackground, DI_NORMAL);
@@ -1051,69 +1043,88 @@ static void RedrawSwitcher(void)
 			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, selectionBackground, DI_NORMAL);
 
 			// Draw app name
-			u16 *title = app->name.text;
+			u16 *titleText = app->name.text;
+			RECT titleRect = {0}; // DrawTextW uses a destination rect for drawing
 
 			// Measure text width
-			RECT testRect = {0};
-			DrawTextW(DrawingContext, title, -1, &testRect, DT_CALCRECT | DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
-			i32 textWidth = (testRect.right - testRect.left) + 2; // Hmm, measured size seems a teensy bit too small, so +2
+			DrawTextW(DrawingContext, titleText, -1, &titleRect, DT_CALCRECT | DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
+			i32 titleWidth = (titleRect.right - titleRect.left) + 2; // Hmm, measured size seems a teensy bit too small, so +2
 
-			// DrawTextW uses a destination rect for drawing
-			RECT textRect = {0};
-			textRect.left = left;
-			textRect.right = right;
-			textRect.bottom = rect.bottom;
+			titleRect.left = left;
+			titleRect.right = right;
+			titleRect.bottom = windowRect.bottom;
 
-			i32 widthDiff = textWidth - (textRect.right - textRect.left);
+			i32 widthDiff = titleWidth - (titleRect.right - titleRect.left);
 			if (widthDiff > 0) {
-				// textRect is too small for text, grow the rect
-				textRect.left -= (i32)ceil(widthDiff / 2.0);
-				textRect.right += (i32)floor(widthDiff / 2.0);
+				// titleRect is too small for text, grow the rect
+				titleRect.left -= (i32)ceil(widthDiff / 2.0);
+				titleRect.right += (i32)floor(widthDiff / 2.0);
 			}
 
-			textRect.bottom -= ICON_PAD; // *** this lifts the app text up a little ***
+			titleRect.bottom -= ICON_PAD; // *** this lifts the app text up a little ***
 
 			// If the app name, when centered, extends past window bounds, adjust label position to be inside window bounds
-			if (textRect.right > rect.right) {
-				textRect.left -= (textRect.right - rect.right) + ICON_PAD;
-				textRect.right = rect.right - ICON_PAD;
+			if (titleRect.right > windowRect.right) {
+				titleRect.left -= (titleRect.right - windowRect.right) + ICON_PAD;
+				titleRect.right = windowRect.right - ICON_PAD;
 			}
-			if (textRect.left < 0) {
-				textRect.right += ICON_PAD + abs(textRect.left);
-				textRect.left   = ICON_PAD + 0;
+			if (titleRect.left < 0) {
+				titleRect.right += ICON_PAD + abs(titleRect.left);
+				titleRect.left   = ICON_PAD + 0;
 			}
 
-			///* dbg */ FillRect(DrawingContext, &textRect, CreateSolidBrush(RGB(255, 0, 0))); // Check the size of the text box
-			DrawTextW(DrawingContext, title, -1, &textRect, DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
+			///* dbg */ FillRect(DrawingContext, &titleRect, CreateSolidBrush(RGB(255, 0, 0))); // Check the size of the text box
+			DrawTextW(DrawingContext, titleText, -1, &titleRect, DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
 		}
 	}
 }
 
+static void ReceiveLastInputEvent(void)
+{
+	// Oh my, the fucking rabbit hole...
+	// This is a hack (one of many flavors) to bypass the restrictions on setting the foreground window
+	// https://github.com/microsoft/PowerToys/blob/7d0304fd06939d9f552e75be9c830db22f8ff9e2/src/modules/fancyzones/FancyZonesLib/util.cpp#L376
+	//
+	// There is also a subtle issue with the Alt-key functionality of windows with menus, where
+	// the menu selection will get stuck until the window gets an AltUp event. It doesn't seem
+	// to help to send the AltUp event globally; I think the window must receive it to reset its
+	// menu selection. But this differs from Windows' normal AltTab widget, which somehow bypasses
+	// this issue. I've confirmed that the AltTab window does something different because there are
+	// subtle observable behavior differences in the menu selection when Windows' normal AltTab is
+	// invoked vs. cmdtab. In the end, I figured out that instead of sending an AltUp event, if I
+	// just steal focus as quickly as possible upon activation, the menu selection does not get stuck,
+	// and the behavior exhibited perfectly matches Windows' normal AltTab. Success!
+	SendInput(1, &(INPUT){.type = INPUT_MOUSE}, sizeof(INPUT));
+	//SendInput(1, &(INPUT){.type = INPUT_KEYBOARD}, sizeof(INPUT));
+}
+
+static void SendModKeysUp(void)
+{
+	SendInput(1,
+		(INPUT[]) {
+		(INPUT){.type = INPUT_KEYBOARD, .ki.wVk = Config.hotkeyForApps.mod, .ki.dwFlags = KEYEVENTF_KEYUP},
+		(INPUT){.type = INPUT_KEYBOARD, .ki.wVk = Config.hotkeyForWindows.mod, .ki.dwFlags = KEYEVENTF_KEYUP},
+		},
+		sizeof(INPUT));
+}
+
 static void ShowSwitcher(void)
 {
-	//ReceiveLastInputEvent();
-	ShowWindow(Switcher, SW_SHOWNA);
-	if (SetForegroundWindow(Switcher)) {
+	ReceiveLastInputEvent();
+	if (SetForegroundWindow(GetLastActivePopup(Switcher))) {
 		LockSetForegroundWindow(LSFW_LOCK);
+		ShowWindow(Switcher, SW_SHOWNA);
 	}
 }
 
-static void CancelSwitcher(bool restore)
+static void CancelSwitcher(void)
 {
 	Print(L"cancel/close\n");
 	HideWindow(Switcher);
 	LockSetForegroundWindow(LSFW_UNLOCK);
-	if (restore) {
-		// TODO Check that the restore window is not the second most recently
-		//      activated window (after my own switcher window), so that I
-		//      don't needlessly switch to the window that will naturally
-		//      become activated once my switcher window hides
-		ShowWindowX(RestorableWindow);
-	}
 	// Reset selection
 	SelectedApp = null;
 	SelectedWindow = null;
-	RestorableWindow = null;
 }
 
 //static void CloseWindows(handle hwnd) // Alternative to TerminateWindowProcess
@@ -1161,16 +1172,20 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 	KBDLLHOOKSTRUCT *kbd = (KBDLLHOOKSTRUCT *)lparam;
 	u32 keyCode = kbd->vkCode;
 	bool keyDown = !(bool)(kbd->flags & LLKHF_UP);
-	
-	#ifdef _DEBUG
-	if ((kbd->flags & LLKHF_INJECTED) == LLKHF_INJECTED) {
+
+	bool injected = (kbd->flags & LLKHF_INJECTED) == LLKHF_INJECTED;
+	if (injected && !keyDown && (keyCode == Config.hotkeyForApps.mod || keyCode == Config.hotkeyForWindows.mod)) {
+		// As a sledgehammer to avoid stuck mod keys, I send mod keyups.
+		// This kbd hook is then sent that mod keyup which would close the
+		// switcher. But we need to avoid that, so we skip events that are
+		// injected mod keyups.
 		u16 keyName[32] = {0};
 		int length = GetKeyNameTextW(kbd->scanCode << 16, keyName, countof(keyName));
-		Log(L"skip INJECTED INPUT %s %s\n", keyCode ? keyName : L"", keyCode ? keyDown ? L"down" : L"up" : L"");
+		Print(L"skip INJECTED INPUT %s %s\n", keyCode ? keyName : L"", keyCode ? keyDown ? L"down" : L"up" : L"");
 		goto passMessage;
 	}
-	#endif
 
+	// (SelectedWindow == NULL) means Switcher is not active/visible
 	if (!SelectedWindow) {
 
 		bool keyRepeat = SetKey(keyCode, keyDown); // Manually track key repeat
@@ -1192,10 +1207,10 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				Print(L"no apps\n");
 				goto passMessage;
 			}
-			ReceiveLastInputEvent();
-			SelectFirstWindow(); // Initialize selection
+			//PostMessageW(GetForegroundWindow(), WM_SYSCOMMAND, SC_KEYMENU, 0);
+			SelectFirstApp(); // Initialize selection
 			if (*SelectedWindow == GetCoreWindow(GetForegroundWindow())) { // Don't select next when on blank desktop
-				SelectNextWindow(true, shiftHeld, !Config.wrapbump || !keyRepeat);
+				SelectNextApp(shiftHeld, !Config.wrapbump || !keyRepeat);
 			}
 			if (Config.showSwitcherForApps) {
 				ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
@@ -1216,9 +1231,9 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				Print(L"no apps\n");
 				goto passMessage;
 			}
-			ReceiveLastInputEvent();
-			SelectFirstWindow(); // Initialize selection
-			SelectNextWindow(false, shiftHeld, !Config.wrapbump || !keyRepeat);
+			//PostMessageW(GetForegroundWindow(), WM_SYSCOMMAND, SC_KEYMENU, 0);
+			SelectFirstApp(); // Initialize selection
+			SelectNextWindow(shiftHeld, !Config.wrapbump || !keyRepeat);
 			if (Config.showSwitcherForWindows) {
 				ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 				RedrawSwitcher();
@@ -1242,14 +1257,21 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 		bool mod2Up = keyCode == Config.hotkeyForWindows.mod && !keyDown;
 
 		if (mod1Up || mod2Up) {
-			// Alt keyup - switch to selected window
+			Print(L"hide\n");
+			// Mod keyup - switch to selected window
 			// Always pass/never consume mod key up, because:
 			// 1) cmdtab never hooks mod keydowns
-			// 2) cmdtab hooks mod keyups, but always passes it through on pain of getting a stuck Alt key because of point 1
-			ReceiveLastInputEvent();
-			ShowWindowX(*SelectedWindow);
-			CancelSwitcher(false);
-			goto passMessage; // See note above on "Alt keyup" on why I don't consume this message
+			// 2) cmdtab hooks mod keyups, but always passes it through on pain
+			//    of getting a stuck Alt key because of point 1
+			// EDIT:
+			// So after much experimentation it seems to work best to consume
+			// these mod keyups and manually send mod keyups. I dunno why.
+			if (GetForegroundWindow() != *SelectedWindow) {
+				SendModKeysUp();
+				ShowWindowX(*SelectedWindow);
+			}
+			CancelSwitcher();
+			goto consumeMessage; // See note above on "Alt keyup" on why I don't consume this message
 		} else {
 
 			bool keyRepeat = SetKey(keyCode, keyDown); // Manually track key repeat
@@ -1267,7 +1289,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			// Subsequent Alt-Tab - next app (hold Shift for previous)
 			// Also arrow keys, left and right
 			if (key1Down || (nextDown || prevDown)) {
-				SelectNextWindow(true, shiftHeld || prevDown, !Config.wrapbump || !keyRepeat);
+				SelectNextApp(shiftHeld || prevDown, !Config.wrapbump || !keyRepeat);
 				if (Config.showSwitcherForApps) {
 					ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 					RedrawSwitcher();
@@ -1284,7 +1306,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			// Subsequent Alt-Tilde/Backquote - next window (hold Shift for previous)
 			// TODO Also arrow keys, up and down
 			if (key2Down) {
-				SelectNextWindow(false, shiftHeld, !Config.wrapbump || !keyRepeat);
+				SelectNextWindow(shiftHeld, !Config.wrapbump || !keyRepeat);
 				if (Config.showSwitcherForWindows) {
 					ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 					RedrawSwitcher();
@@ -1308,14 +1330,14 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			// Alt-Enter - switch to selected window
 			if (enterDown) {
 				ShowWindowX(*SelectedWindow);
-				CancelSwitcher(false);
+				CancelSwitcher();
 				// Since our swicher is active, I "own" this hotkey, so I consume this message
 				// This will consume the enterDown event. Windows will not know that Enter was pressed
 				goto consumeMessage;
 			}
 			// Alt-Esc - cancel switching and restore initial window
 			if (escDown) { // BUG There's a bug here if mod1Held and mod2Held aren't both the same key. In that case I'll still pass through the key event, even though I should own it since it's not Alt-Esc
-				CancelSwitcher(Config.restoreOnCancel);
+				CancelSwitcher();
 				// Since our swicher is active, I "own" this hotkey, so I consume this message
 				// This will consume the escDown event. Windows will not know that Escape was pressed
 				goto consumeMessage;
@@ -1344,6 +1366,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				TerminateWindowProcess(*SelectedWindow);
 				if (SelectedApp == &Apps[AppsCount-1] && AppsCount > 1) {
 					SelectedApp--;
+					SelectedWindow = &SelectedApp->windows[0];
 				}
 				UpdateApps();
 				ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
@@ -1371,7 +1394,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			// Alt-B - display app name and window class to user, to add in blacklist
 			if (keyBDown) {
 				handle selectedWindow = *SelectedWindow; // CancelSwitcher resets SelectedWindow
-				CancelSwitcher(false);
+				CancelSwitcher();
 				ReportWindowHandle(Switcher, selectedWindow);
 				goto consumeMessage;
 			}
@@ -1380,11 +1403,12 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			// Debug
 			// ========================================
 
-			bool keyF11Down = keyCode == VK_F11 && keyDown;
-			bool keyF12Down = keyCode == VK_F12 && keyDown;
+			bool keyF11Down = keyCode == VK_F11 && keyDown && !keyRepeat;
+			bool keyF12Down = keyCode == VK_F12 && keyDown && !keyRepeat;
 
 			if (keyF12Down) {
-				Debug(L"debug hotkey");
+				Log(L"debug hotkey");
+				__debugbreak();
 			}
 			if (keyF11Down) {
 				PrintApps();
@@ -1426,38 +1450,34 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 		return 1;
 }
 
-static void OnWindowCreate(void)
+static i64 OnSwitcherCreate(void)
 {
 	// Make the codepath hot to prevent kbd hook from timing out on first use
 	UpdateApps();
 }
 
-static void OnWindowPaint(void)
+static i64 OnSwitcherPaint(void)
 {
-	// Double buffered drawing:
+	// Double buffered drawing, just blit the DrawingContext
 	// I draw off-screen in-memory to 'DrawingContext' whenever changes occur,
 	// and whenever I get the WM_PAINT message I just blit the
 	// off-screen buffer to screen ("screen" means the 'hdc' returned by
 	// BeginPaint passed our 'hwnd')
-	PAINTSTRUCT ps = {0};
-	handle context = BeginPaint(Switcher, &ps);
-	if (ps.fErase) {
+	PAINTSTRUCT ps;
+	if (BeginPaint(Switcher, &ps)) {
+		if (ps.fErase) {
+		}
+		BitBlt(ps.hdc, 0, 0, DrawingRect.right - DrawingRect.left, DrawingRect.bottom - DrawingRect.top, DrawingContext, 0, 0, SRCCOPY);
+		EndPaint(Switcher, &ps);
 	}
-	BitBlt(context, 0, 0, DrawingRect.right - DrawingRect.left, DrawingRect.bottom - DrawingRect.top, DrawingContext, 0, 0, SRCCOPY);
-	//int scale = 1.0;
-	//SetStretchBltMode(DrawingContext, HALFTONE);
-	//StretchBlt(hdc, 0, 0, gdi_width, gdi_height, DrawingContext, 0, 0, gdi_width * scale, gdi_height * scale, SRCCOPY);
-	EndPaint(Switcher, &ps);
-	ReleaseDC(Switcher, context);
 }
 
-static void OnWindowFocusChange(bool focused)
+static i64 OnSwitcherFocusChange(bool focused)
 {
 	// Cancel on mouse clicking outside window
 	if (focused) {
 		Print(L"switcher got focus\n");
-		//return 0;
-		//synckeys();
+		return 0;
 	} else {
 		// This rarely happens atm with the current implementation
 		// because I don't set the switcher as foreground window when
@@ -1469,68 +1489,99 @@ static void OnWindowFocusChange(bool focused)
 		// (i.e. not becoming foreground)--it's a little unorthodox.
 		// But for now that's how it is.
 		Print(L"switcher lost focus\n");
-		//return 1; // Nu-uh!
-		//cancel(false); // NOTE See comments in cancel
+		return 1; // Nu-uh!
 	}
 }
 
-static void OnWindowMouseMove(int x, int y)
+static i64 OnSwitcherMouseMove(int x, int y)
 {
 	MouseX = x; // GetMessagePos
 	MouseY = y;
-	//print(L"x%i y%i\n", MouseX, MouseY);
-}
+	//Print(L"x%i y%i\n", MouseX, MouseY);
 
-static void OnWindowMouseLeave(void)
-{
-	MouseX = 0;
-	MouseY = 0;
-	//print(L"x%i y%i\n", MouseX, MouseY);
-}
+	// Iteration logic copy/pasted from RedrawSwitcher, so if something changes
+	// there update this:
+	u32 ICON_WIDTH = 64;
+	u32 ICON_PAD   =  8;
+	u32 HORZ_PAD   = 24;
+	u32 VERT_PAD   = 32;
 
-static void OnWindowClose(void)
-{
-	CancelSwitcher(false);
-	if (Ask(Switcher, L"Quit cmdtab?")) {
-		DestroyWindow(Switcher);//return DefWindowProcW(hwnd, message, wparam, lparam); // Calls DestroyWindow
+	for (int i = 0; i < AppsCount; i++) {
+		struct app *app = &Apps[i];
+
+		// Special-case math for index 0
+		i32  left0 = i == 0 ? ICON_PAD : 0;
+		i32 right0 = i != 0 ? ICON_PAD : 0;
+
+		i32  icons = (ICON_PAD + ICON_WIDTH + ICON_PAD) * i;
+		i32   left = HORZ_PAD + left0 + icons + right0;
+		i32    top = VERT_PAD;
+		i32  width = ICON_WIDTH;
+		i32 height = ICON_WIDTH;
+		i32  right = left + width;
+		i32 bottom = top + height;
+
+		bool mouseIsOverIcon = PtInRect(&(RECT){left, top, right, bottom}, (POINT){MouseX, MouseY});
+		if (mouseIsOverIcon && SelectedApp != app) {
+			SelectedApp = app;
+			SelectedWindow = &SelectedApp->windows[0];
+			/*dbg*/Print(L"select app ");
+			/*dbg*/PrintWindowX(*SelectedWindow);
+			RedrawSwitcher();
+		}
 	}
 }
 
-static void OnShellWindowActivated(handle hwnd)
+static i64 OnSwitcherMouseLeave(void)
+{
+	OnSwitcherMouseMove(0, 0);
+}
+
+static i64 OnSwitcherMouseUp(void)
+{
+	// Copy/pasted from (mod1up || mod2up) in KeyboardHookProcedure, so if
+	// something changes there, update here:
+	if (GetForegroundWindow() != *SelectedWindow) {
+		//SendModKeysUp();
+		ShowWindowX(*SelectedWindow);
+	}
+	CancelSwitcher();
+}
+
+static i64 OnSwitcherClose(void)
+{
+	CancelSwitcher();
+	if (Ask(Switcher, L"Quit cmdtab?")) {
+		DestroyWindow(Switcher);
+	}
+}
+
+static i64 OnShellWindowActivated(handle hwnd)
 {
 	AddToHistory(hwnd);
 }
 
-static i64 WindowProcedure(handle hwnd, u32 message, u64 wparam, i64 lparam)
+static i64 SwitcherWindowProcedure(handle hwnd, u32 message, u64 wparam, i64 lparam)
 {
 	switch (message) {
 		case WM_CREATE:
-			OnWindowCreate();
-			break;
+			return OnSwitcherCreate();
 		case WM_PAINT:
-			OnWindowPaint();
-			break;
+			return OnSwitcherPaint();
 		case WM_ACTIVATEAPP:
-			OnWindowFocusChange(wparam != WA_INACTIVE);
-			break;
+			return OnSwitcherFocusChange(wparam != WA_INACTIVE);
 		case WM_MOUSEMOVE:
-			OnWindowMouseMove(LOWORD(lparam), HIWORD(lparam));
 			TrackMouseEvent(&(TRACKMOUSEEVENT){.cbSize = sizeof(TRACKMOUSEEVENT), .dwFlags = TME_LEAVE, .hwndTrack = hwnd});
-			break;
+			return OnSwitcherMouseMove(LOWORD(lparam), HIWORD(lparam));
 		case WM_MOUSELEAVE:
-			OnWindowMouseLeave();
-			break;
+			return OnSwitcherMouseLeave();
+		case WM_LBUTTONUP:
+			return OnSwitcherMouseUp();
 		case WM_CLOSE:
-			OnWindowClose();
-			break;
-		case WM_DESTROY:
-			PostQuitMessage(0);
-			break;
-		default: {
+			return OnSwitcherClose();
+		default:
 			return DefWindowProcW(hwnd, message, wparam, lparam);
-		}
 	}
-	return 0;
 }
 
 static VOID CALLBACK EventHookProcedure(HWINEVENTHOOK hook, ULONG event, HWND hwnd, LONG objectid, LONG childid, ULONG threadid, ULONG timestamp)
@@ -1538,8 +1589,7 @@ static VOID CALLBACK EventHookProcedure(HWINEVENTHOOK hook, ULONG event, HWND hw
 	switch (event) {
 		case EVENT_SYSTEM_FOREGROUND:
 			Print(L"FOREGROUND WINDOW EVENT\n");
-			OnShellWindowActivated(hwnd);
-			break;
+			/* fallthrough */
 		case EVENT_OBJECT_UNCLOAKED:
 			Print(L"UNCLOAKED WINDOW EVENT\n");
 			OnShellWindowActivated(hwnd);
@@ -1574,16 +1624,16 @@ static void QuitSecondInstance(void)
 static int RunCmdTab(handle instance, u16 *args)
 {
 	handle mutex;
-	//handle mainWindow; // Switcher
+	//handle mainWindow; // aka. 'Switcher'
 	handle keyboardHook, eventHook1, eventHook2;
 
-	if (!HasAutorunLaunchArgument(args)) {
+	if (!HasAutorunLaunchArgument(args) && Config.askAutorun) {
 		AskAutorun();
 	}
 	if (AlreadyRunning(&mutex)) {
 		QuitSecondInstance();
 	}
-	
+
 	//
 	i32 _ = CoInitialize(null);
 
@@ -1593,9 +1643,9 @@ static int RunCmdTab(handle instance, u16 *args)
 	// Create switcher window
 	WNDCLASSEXW wcex = {0};
 	wcex.cbSize = sizeof wcex;
-	wcex.lpfnWndProc = (WNDPROC)WindowProcedure;
+	wcex.lpfnWndProc = (WNDPROC)SwitcherWindowProcedure;
 	wcex.hInstance = instance;
-	wcex.hCursor = LoadCursor(instance, IDC_ARROW);
+	wcex.hCursor = LoadCursorW(null, IDC_ARROW);
 	wcex.lpszClassName = L"cmdtabSwitcher";
 	Switcher = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, MAKEINTATOM(RegisterClassExW(&wcex)), null, 0, 0, 0, 0, 0, null, null, instance, null);
 	// Clear all window styles for very plain window
@@ -1608,21 +1658,20 @@ static int RunCmdTab(handle instance, u16 *args)
 	keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, (HOOKPROC)KeyboardHookProcedure, null, 0);
 	eventHook1 = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, null, EventHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
 	eventHook2 = SetWinEventHook(EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_UNCLOAKED, null, EventHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
-	
+
 	// Run message loop
 	for (MSG msg; GetMessageW(&msg, Switcher, 0, 0) > 0;) DispatchMessageW(&msg); // Not handling -1 errors. Whatever
-	
+
 	// Uninstall keyboard & event hooks
 	UnhookWindowsHookEx(keyboardHook);
 	UnhookWinEvent(eventHook1);
 	UnhookWinEvent(eventHook2);
 
+	//
 	CoUninitialize();
 
-	if (mutex) {
-		ReleaseMutex(mutex);
-		//CloseHandle(hMutex);
-	}
+	if (mutex) ReleaseMutex(mutex);
+
 	Print(L"cmdtab quit\n");
 	bool hasLeaks = _CrtDumpMemoryLeaks();
 	return hasLeaks;

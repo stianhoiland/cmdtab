@@ -3,7 +3,7 @@ project(cmdtab C)
 
 set(C_STANDARD 99)
 set(C_STANDARD_REQUIRED TRUE)
-set(BUILD_TYPE "Debug")
+set(BUILD_TYPE "MinSizeRel")
 
 add_executable(cmdtab WIN32 "src/cmdtab.c" "res/cmdtab.rc")
 

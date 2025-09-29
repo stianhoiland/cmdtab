@@ -1,0 +1,33 @@
+.POSIX:
+.SUFFIXES:
+.PHONY: clean run debug release
+
+CC         = c99
+CFLAGS     = -std=c99
+WARNINGS   = -Wall -Wextra -pedantic -Wno-unused-parameter
+LDLIBS     = -lole32 -lcomctl32 -lgdi32 -lshlwapi -ldwmapi -lpathcch -lversion -lwinmm
+
+ifdef RELEASE
+CFLAGS    += -Oz -DNDEBUG=1 -mwindows
+LDFLAGS   += -s
+else
+CFLAGS    += $(WARNINGS) -ggdb3 -Og -D_DEBUG=1 -DDEBUG=1
+endif
+
+cmdtab.exe: src/cmdtab.c res/cmdtab.o
+	$(CC) $(CFLAGS) $(LDFLAGS) $(INCLUDE) -o $@ $^ $(LDLIBS)
+
+%.o: %.rc
+	windres -I res/ -o $@ $^
+
+clean:
+	rm cmdtab.exe res/cmdtab.o || true
+
+run: cmdtab.exe
+	gdb --batch --ex=run --args cmdtab.exe
+
+debug:
+	gdb --ex=start --args cmdtab.exe
+
+release: clean
+	make RELEASE=1

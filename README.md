@@ -52,9 +52,9 @@ There's no installation. Just download the [latest version](https://github.com/s
 
 ### Autorun
 > [!NOTE]
-> The autorun that **cmdtab** enables if you choose "Yes" when it prompts you about autorun is not "Run as administrator". In the future, **cmdtab** will support run automatically as administrator, but for now you must manually configure this by using the command below.
+> The autorun that **cmdtab** enables if you choose "Yes" when it prompts you about autorun is not "Run as administrator". In the future, **cmdtab** will support autorun as admin, but for now you must manually configure this by using the command below.
 
-It makes sense to have **cmdtab** "Run as administrator", and it makes sense to have **cmdtab** run automatically on login. Doing either is easy, but doing both, i.e. run automatically as administrator, is not so easy. The only way to run automatically as administrator is to use the Windows Task Scheduler. To create an appropriate scheduled task from the Command Prompt run this command:
+It makes sense to have **cmdtab** "Run as administrator", and it makes sense to have **cmdtab** autorun on login. Doing either is easy, but doing both, i.e. autorun as admin, is not so easy. The only way to autorun as admin is to use the Windows Task Scheduler. To create an appropriate scheduled task from the Command Prompt run this command:
 ```console
 schtasks /create /sc onlogon /rl highest /tn "cmdtab elevated autorun" /tr "C:\Users\<YOUR_USER_NAME>\Downloads\cmdtab-v1.5.1-win-x86_64\cmdtab.exe --autorun"
 ```
