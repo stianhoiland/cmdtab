@@ -1,5 +1,5 @@
 # cmdtab
-Fast and lightweight macOS-style Alt-Tab app/window switcher replacement for Windows, written in the Lord's language, C.
+Fast and super lightweight macOS-style Alt-Tab app/window switcher replacement for Windows, written in the Lord's language, C.
 
 ![cmdtab-screenshot](https://github.com/stianhoiland/cmdtab/assets/2081712/ec5d0d61-005f-4123-b191-8d5b49d1f7db)
 
@@ -17,9 +17,9 @@ So, you like the way Apple does it, but you're using Windows? **cmdtab** for Win
 - A hotkey to cycle apps (Chrome → Spotify → File Explorer)
 - A different hotkey to cycle windows (Chrome1 → Chrome2 → Chrome3)
 - Big readable app icons
-- Super lightweight program (35kb)
+- Super lightweight program (<50kb)
 - Simple, clean, clear, commented C source code (easy to change/fix/extend by you/me/everyone!)
-- Lots of tiny, useful QoL features, like reverse, arrow keys & enter, cancel, restore, mouse support, wrap bump, quit app, close window, delayed show...
+- Lots of tiny, useful QoL features, like reverse, arrow keys & enter, cancel, ~~restore~~, mouse support, wrap bump, quit app, close window, ~~delayed show~~...
 - So fast!
 - The best macOS-style window switcher for Windows!
 - C!
@@ -32,14 +32,14 @@ The basics of window switching are easy to understand, but why is **cmdtab** *th
 - Reverse direction by holding Shift
 - Arrow keys are supported (selects apps in switcher)
 - Enter key is supported (switches to selected window)
-- ~~Mouse is supported (click an app icon to switch to that app)~~ (WIP!)
+- Mouse is supported (click an app icon to switch to that app)
 - Big readable app icons (not those tiny bewildering window previews)
 - Cancel and close the switcher by pressing Escape
 - Smart key capture so key presses don't unexpectedly bleed through to other apps
 - Wrap bump is hard to explain but easy to feel: Try holding Alt-Tab until the end, then press Tab again—works in reverse, too!
 - Press Q to quit the selected app
 - Press W to close the selected window
-- Option to return to the initial window when cancelling switcher by pressing Escape. This doesn't override or block Windows' native Alt-Escape hotkey
+- ~~Option to return to the initial window when cancelling switcher by pressing Escape. This doesn't override or block Windows' native Alt-Escape hotkey~~
 - Press F4 while the switcher is open to quit **cmdtab**
 
 That's a lot of useful stuff, and the code is small! Go read it, and learn some C while you're at it.
@@ -61,9 +61,11 @@ schtasks /create /sc onlogon /rl highest /tn "cmdtab elevated autorun" /tr "C:\U
 You can further customize the scheduled task created by that command by running `taskschd.msc`.
 
 ### Uninstalling
-**cmdtab** leaves no trace on your system, except for a registry key if you choose "Yes" when  **cmdtab** prompts you about autorun (and the scheduled task mentioned above if you manually created it). You can remove this registry key by using **cmdtab** itself. Just run **cmdtab** one last time before you delete `cmdtab.exe` and choose "No" to autorun. This deletes any registry key **cmdtab** has created.
+**cmdtab** leaves no trace on your system, except for a registry key if you choose "Yes" when  **cmdtab** prompts you about autorun (and the scheduled task mentioned above if you manually created it). You can remove the autorun registry key by running **cmdtab** one last time before you delete `cmdtab.exe` and choose "No" to autorun.
 
 ## Buildling from source
+
+#### MSVC/CMake
 These instructions require `git`, `cmake`, and *Visual Studio* or *MSBuild*.
 1. `git clone https://github.com/stianhoiland/cmdtab.git`
 2. `cd cmdtab`
@@ -72,3 +74,10 @@ These instructions require `git`, `cmake`, and *Visual Studio* or *MSBuild*.
 5. *(in developer console)* `devenv build\cmdtab.sln /build "MinSizeRel|x64"`
 6. or: *(in developer console)* `msbuild build\cmdtab.sln /property:Configuration=MinSizeRel`
 7. *(run cmdtab)* `build\MinSizeRel\cmdtab.exe`
+
+#### mingw-w64 GCC/make
+These instructions require `git`, `make`, `windres`, and `gcc`.
+1. `git clone https://github.com/stianhoiland/cmdtab.git`
+2. `cd cmdtab`
+3. `make release`
+4. *(run cmdtab)* `./cmdtab.exe`
