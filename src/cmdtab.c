@@ -1100,7 +1100,7 @@ static void ReceiveLastInputEvent(void)
 
 static void SendModKeysUp(void)
 {
-	SendInput(1,
+	SendInput(2,
 		(INPUT[]) {
 		(INPUT){.type = INPUT_KEYBOARD, .ki.wVk = Config.hotkeyForApps.mod, .ki.dwFlags = KEYEVENTF_KEYUP},
 		(INPUT){.type = INPUT_KEYBOARD, .ki.wVk = Config.hotkeyForWindows.mod, .ki.dwFlags = KEYEVENTF_KEYUP},
@@ -1266,8 +1266,8 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			// EDIT:
 			// So after much experimentation it seems to work best to consume
 			// these mod keyups and manually send mod keyups. I dunno why.
+			SendModKeysUp();
 			if (GetForegroundWindow() != *SelectedWindow) {
-				SendModKeysUp();
 				ShowWindowX(*SelectedWindow);
 			}
 			CancelSwitcher();
