@@ -321,7 +321,7 @@ static void PrintWindowX(handle hwnd) // PrintWindow already taken
 
 static string GetAppName(string *filepath)
 {
-	// Query version info for pretty application name. See cmdtab's own res/cmdtab.rc file for an idea of the data that is queried.
+	// Query version info for pretty application name. See cmdtab's own res/cmdtab.rc file for an idea of the data that is queried
 
 	string name = {0};
 
@@ -575,31 +575,31 @@ struct config {
 	u32 iconHorzPadding;
 	// Blacklist
 	struct identifier {
-		u16 *filename;          // Filename without file extension, ex. "explorer". Can be null.
-		u16 *windowClass;       // Window class name. Can be null.
+		u16 *filename;          // Filename without file extension, ex. "explorer". Can be null
+		u16 *windowClass;       // Window class name. Can be null
 	} blacklist[32];
 };
 
 struct app {
-	string path;                // Full path of app executable.
-	string name;                // Product description/name, or filename without extension as fallback.
-	handle icon;                // Big app icon.
-	handle windows[64];         // App windows that can be switched to.
-	size windowsCount;          // Number of elements in 'windows' array.
+	string path;                // Full path of app executable
+	string name;                // Product description/name, or filename without extension as fallback
+	handle icon;                // Big app icon
+	handle windows[64];         // App windows that can be switched to
+	size windowsCount;          // Number of elements in 'windows' array
 };
 
-static handle      History[128];   // Window activation history (MRU) from Windows events. Deduplicated, so prior activations are moved to the front.
-static size        HistoryCount;   // Number of elements in 'History' array.
-static struct app  Apps[128];      // Apps that are displayed in switcher.
-static size        AppsCount;      // Number of elements in 'Apps' array.
-static struct app *SelectedApp;    // Pointer to one of the elements in 'Apps' array. The app for the 'SelectedWindow'.
-static handle     *SelectedWindow; // Currently selected window in switcher. Non-NULL indicates switcher is active.
-static handle      Switcher;       // Handle for main window (i.e. switcher).
-static handle      DrawingContext; // Drawing context for double-buffered drawing of main window.
-static handle      DrawingBitmap;  // Off-screen bitmap used for double-buffered drawing of main window.
-static RECT        DrawingRect;    // Size of the off-screen bitmap.
-static u16         Keyboard[16];   // 256 bits to track key repeat for low-level keyboard hook.
-static i32         MouseX, MouseY; // Mouse position, for highlighting and clicking app icons in switcher.
+static handle      History[128];    // Window activation history (MRU) from Windows events. Deduplicated, so prior activations are moved to the front
+static size        HistoryCount;    // Number of elements in 'History' array
+static struct app  Apps[128];       // Apps that are displayed in switcher
+static size        AppsCount;       // Number of elements in 'Apps' array
+static struct app *SelectedApp;     // Pointer to one of the elements in 'Apps' array. The app for the 'SelectedWindow'
+static handle     *SelectedWindow;  // Currently selected window in switcher. Non-NULL indicates switcher is active
+static handle      Switcher;        // Handle for main window (i.e. switcher)
+static handle      DrawingContext;  // Drawing context for double-buffered drawing of main window
+static handle      DrawingBitmap;   // Off-screen bitmap used for double-buffered drawing of main window
+static RECT        DrawingRect;     // Size of the off-screen bitmap
+static u16         Keyboard[16];    // 256 bits to track key repeat for low-level keyboard hook
+static i32         MouseX, MouseY;  // Mouse position, for highlighting and clicking app icons in switcher
 
 static struct config Config = { // cmdtab settings
 	// Hotkeys
