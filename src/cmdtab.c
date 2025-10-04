@@ -68,6 +68,7 @@ typedef unsigned int        u32;
 typedef unsigned long long  u64;
 typedef signed int          i32;
 typedef signed long long    i64;
+typedef float               f32;
 typedef signed int         bool;
 typedef ptrdiff_t          size;
 typedef void *           handle;
@@ -1067,22 +1068,35 @@ static void SelectNextWindow(bool reverse, bool wrap)
 
 static void ResizeSwitcher(void)
 {
+	// TODO Promote to file-scope
+	u32 dpi = GetDpiForWindow(Switcher);
+	f32 scale = (f32)dpi / 96.0f;
+
 	// Use the monitor where the mouse pointer is currently placed (#5)
 	POINT mousePos = {0};
 	MONITORINFO mi = {.cbSize = sizeof mi};
 	GetCursorPos(&mousePos);
 	GetMonitorInfoW(MonitorFromPoint(mousePos, MONITOR_DEFAULTTONEAREST), &mi);
 
-	u32   iconsWidth = AppsCount * Config.iconWidth;
-	u32 paddingWidth = AppsCount * Config.iconHorzPadding * 2;
-	u32  marginWidth =         2 * Config.switcherHorzMargin;
+	u32     iconsWidth = scale * AppsCount * Config.iconWidth;
+	u32   paddingWidth = scale * AppsCount * Config.iconHorzPadding * 2;
+	u32    marginWidth = scale *         2 * Config.switcherHorzMargin;
+	u32 switcherHeight = scale * Config.switcherHeight;
 
 	u32 w = iconsWidth + paddingWidth + marginWidth;
-	u32 h = Config.switcherHeight;
+	u32 h = switcherHeight;
 	i32 x = mi.rcMonitor.left + (mi.rcMonitor.right - mi.rcMonitor.left - w) / 2;
 	i32 y = mi.rcMonitor.top + (mi.rcMonitor.bottom - mi.rcMonitor.top - h) / 2;
 
-	MoveWindow(Switcher, x, y, w, h, false); // Yes, "MoveWindow" means "ResizeWindow"
+	RECT window = {0};
+	window.left = x;
+	window.top = y;
+	window.right = w + window.left;
+	window.bottom = h + window.top;
+
+	AdjustWindowRectExForDpi(&window, GetWindowLongW(Switcher, GWL_STYLE), 0, GetWindowLongW(Switcher, GWL_EXSTYLE), dpi);
+
+	MoveWindow(Switcher, window.left, window.top, window.right - window.left, window.bottom - window.top, false); // Yes, "MoveWindow" means "ResizeWindow"
 
 	// Resize off-screen double-buffering bitmap
 	RECT resized = {x, y, x+w, y+h};
@@ -1101,6 +1115,10 @@ static void ResizeSwitcher(void)
 
 static void RedrawSwitcher(void)
 {
+	// TODO Promote to file-scope
+	u32 dpi = GetDpiForWindow(Switcher);
+	f32 scale = (f32)dpi / 96.0f;
+
 	// TODO Use 'Config.style'
 
 	#define BACKGROUND   RGB(32, 32, 32) // dark mode?
@@ -1108,15 +1126,15 @@ static void RedrawSwitcher(void)
 	#define HIGHLIGHT    RGB(76, 194, 255) // Sampled from Windows 11 Alt-Tab
 	#define HIGHLIGHT_BG RGB(11, 11, 11) // Sampled from Windows 11 Alt-Tab
 
-	u32 ICON_WIDTH = Config.iconWidth;
-	u32 ICON_PAD = Config.iconHorzPadding;
-	u32 HORZ_PAD = Config.switcherHorzMargin;
-	u32 VERT_PAD = Config.switcherVertMargin;
+	u32 ICON_WIDTH = scale * Config.iconWidth;
+	u32 ICON_PAD   = scale * Config.iconHorzPadding;
+	u32 HORZ_PAD   = scale * Config.switcherHorzMargin;
+	u32 VERT_PAD   = scale * Config.switcherVertMargin;
 
-	#define SEL_OUTLINE   3
-	#define SEL_RADIUS   10
-	#define SEL_VERT_OFF 10 // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
-	#define SEL_HORZ_OFF  6 // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
+	u32 SEL_OUTLINE  = scale *  3.5;
+	u32 SEL_RADIUS   = scale * 10;
+	u32 SEL_VERT_OFF = scale * 10; // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
+	u32 SEL_HORZ_OFF = scale *  6; // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
 
 	static HBRUSH windowBackground = {0};
 	static HBRUSH selectionBackground = {0};
@@ -1649,12 +1667,17 @@ static i64 OnSwitcherMouseMove(int x, int y)
 		return 0;
 	}
 
+	// TODO Promote to file-scope
+	u32 dpi = GetDpiForWindow(Switcher);
+	f32 scale = (f32)dpi / 96.0f;
+
 	// Iteration logic copy/pasted from RedrawSwitcher, so if something changes
 	// there update this:
-	u32 ICON_WIDTH = Config.iconWidth;
-	u32 ICON_PAD = Config.iconHorzPadding;
-	u32 HORZ_PAD = Config.switcherHorzMargin;
-	u32 VERT_PAD = Config.switcherVertMargin;
+
+	u32 ICON_WIDTH = scale * Config.iconWidth;
+	u32 ICON_PAD   = scale * Config.iconHorzPadding;
+	u32 HORZ_PAD   = scale * Config.switcherHorzMargin;
+	u32 VERT_PAD   = scale * Config.switcherVertMargin;
 
 	for (int i = 0; i < AppsCount; i++) {
 		struct app *app = &Apps[i];
