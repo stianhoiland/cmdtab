@@ -51,8 +51,7 @@ There's no installation. Just download the [latest version](https://github.com/s
 **cmdtab** cannot see elevated applications like Task Manager unless you "Run as administrator", but works well otherwise.
 
 ### Autorun
-> [!NOTE]
-> The autorun that **cmdtab** enables if you choose "Yes" when it prompts you about autorun is not "Run as administrator". In the future, **cmdtab** will support autorun as admin, but for now you must manually configure this by using the command below.
+**cmdtab** will prompt you about autorun when you launch it, but the autorun that **cmdtab** enables if you choose "Yes" is not "Run as administrator". In the future, **cmdtab** will support autorun as admin, but for now you must manually configure this by using the command below.
 
 It makes sense to have **cmdtab** "Run as administrator", and it makes sense to have **cmdtab** autorun on login. Doing either is easy, but doing both, i.e. autorun as admin, is not so easy. The only way to autorun as admin is to use the Windows Task Scheduler. To create an appropriate scheduled task from the Command Prompt run this command:
 ```console
