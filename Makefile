@@ -31,3 +31,6 @@ debug:
 
 release: clean
 	make RELEASE=1
+	zip -9 cmdtab-v0.0.0-win-x86_64.zip cmdtab.exe
+	@printf '%s\n' $$'\x1b[31mREMEMBER TO UPDATE cmdtab.rc & README.md\x1b[0m'
+

@@ -1,8 +1,8 @@
 1 24 "cmdtab.manifest"
 
 1 VERSIONINFO
-	FILEVERSION	1,6,1,0
-	PRODUCTVERSION	1,6,1,0
+	FILEVERSION	1,6,2,0
+	PRODUCTVERSION	1,6,2,0
 	FILEFLAGSMASK	0x3FL
 	#ifdef _DEBUG
 	FILEFLAGS		0x1L
@@ -24,14 +24,14 @@
 				VALUE "Comments",		"N/A"
 				VALUE "CompanyName",		"Stian Gudmundsen Høiland"
 				VALUE "FileDescription",	"cmdtab Window Switcher Alternative"
-				VALUE "FileVersion",		"1.6.1"
+				VALUE "FileVersion",		"1.6.2"
 				VALUE "InternalName",		"cmdtab"
 				VALUE "LegalCopyright",		"Copyright (C) 2023 Stian Gudmundsen Høiland"
 				VALUE "LegalTrademarks",	"N/A"
 				VALUE "OriginalFilename",	"cmdtab.exe"
 				VALUE "PrivateBuild",		"N/A"
 				VALUE "ProductName",		"cmdtab"
-				VALUE "ProductVersion",		"1.6.1"
+				VALUE "ProductVersion",		"1.6.2"
 				VALUE "SpecialBuild",		"N/A"
 			}
 		}

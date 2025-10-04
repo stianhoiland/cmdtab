@@ -79,10 +79,10 @@ struct string {
 	bool ok;
 };
 
-static const string UWPAppHostExe      = string(L"ApplicationFrameHost.exe");
-static const string UWPAppHostClass    = string(L"ApplicationFrameWindow");
-static const string UWPCoreWindowClass = string(L"Windows.UI.Core.CoreWindow");
-static const string UWPAppsPath        = string(L"C:\\Program Files\\WindowsApps");
+static string UWPAppHostExe      = string(L"ApplicationFrameHost.exe");
+static string UWPAppHostClass    = string(L"ApplicationFrameWindow");
+static string UWPCoreWindowClass = string(L"Windows.UI.Core.CoreWindow");
+static string UWPAppsPath        = string(L"C:\\Program Files\\WindowsApps");
 
 static bool StringsAreEqual(string *s1, string *s2)
 {
@@ -283,15 +283,15 @@ static string GetWindowTitle(handle hwnd)
 
 static void PrintWindowX(handle hwnd) // PrintWindow already taken
 {
-	#ifdef _DEBUG
 	if (hwnd) {
+		#ifdef _DEBUG
 		string filepath = GetExePath(hwnd);
 		if (!filepath.ok) return;
 		string filename = StringFileName(&filepath, false);
 		string class = GetWindowClass(hwnd);
 		string title = GetWindowTitle(hwnd);
 		u16 *wsShowState        = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MINIMIZE) ? L" (minimized) " :
-			(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MAXIMIZE) ? L" (maximized) " : L" ";
+                                  (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_MAXIMIZE) ? L" (maximized) " : L" ";
 		u16 *wsChild            = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD) ? L"child" : L"parent";
 		u16 *wsVisible          = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_VISIBLE) ? L", visible" : L", hidden";
 		u16 *exAppWindow        = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_APPWINDOW) ? L", appwindow" : L"";
@@ -311,12 +311,12 @@ static void PrintWindowX(handle hwnd) // PrintWindow already taken
 		Print(L" (%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s)\n",
 			wsChild, wsVisible, exAppWindow, exNoActivate, exToolWindow, exTopMost,
 			wsDisabled, wsPopup, wsOverlapped, wsDlgFrame, exDlgModalFrame, exLayered, exComposited, exPaletteWindow, exOverlappedWindow);
+		#else
+		Print(L"%p\n", hwnd);
+		#endif
 	} else {
 		Print(L"null hwnd\n");
 	}
-	#else
-	Print(L"%p\n", hwnd);
-	#endif
 }
 
 static string GetAppName(string *filepath)
@@ -430,7 +430,7 @@ static bool IsDarkModeEnabled(void)
 {
 	ULONG value;
 	ULONG size = sizeof value;
-	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUsesLightTheme", RRF_RT_DWORD, null, &value, &size)) {
+	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_DWORD, null, &value, &size)) {
 		return !value; // 'value' is true for light mode
 	} else {
 		return true; // Default to dark mode
@@ -553,15 +553,14 @@ static void TerminateWindowProcess(handle hwnd)
 // cmdtab impl
 //==============================================================================
 
-struct config {
+struct ini {
 	// Hotkeys
-	struct { u32 mod, key; } hotkeyForApps;
-	struct { u32 mod, key; } hotkeyForWindows;
+	struct { u32 mod, key, enabled; } hotkeyForApps;
+	struct { u32 mod, key, enabled; } hotkeyForWindows;
 	// Behavior
 	bool askAutorun;
-	bool switchApps;
-	bool switchWindows;
-	bool fastSwitchingForApps; // TODO
+	bool groupByApp; // TODO Can not disable yet
+	bool fastSwitchingForApps;
 	bool fastSwitchingForWindows;
 	bool showSwitcherForApps;
 	bool showSwitcherForWindows;
@@ -588,49 +587,57 @@ struct app {
 	size windowsCount;          // Number of elements in 'windows' array
 };
 
-static handle      History[128];    // Window activation history (MRU) from Windows events. Deduplicated, so prior activations are moved to the front
+static handle      Mutex;           // Singleton mutex to prevent running more than one cmdtab instance
+static struct ini  Config;          // cmdtab settings
+static handle      HistoryHooks[2]; // Hook handles for WinEvent window activation hooks
+static handle      History[128];    // Window handles from window activation events (MRU). Deduplicated, so prior activations are moved to the front
 static size        HistoryCount;    // Number of elements in 'History' array
-static struct app  Apps[128];       // Apps that are displayed in switcher
+static handle      KeyboardHook;    // Handle for low-level keyboard hook
+static u16         Keyboard[16];    // 256 bits to track key repeat for low-level keyboard hook
+static struct app  Apps[128];       // Apps to be displayed in switcher
 static size        AppsCount;       // Number of elements in 'Apps' array
 static struct app *SelectedApp;     // Pointer to one of the elements in 'Apps' array. The app for the 'SelectedWindow'
 static handle     *SelectedWindow;  // Currently selected window in switcher. Non-NULL indicates switcher is active
-static handle      Switcher;        // Handle for main window (i.e. switcher)
+// GUI
+static handle      Switcher;        // Handle for main window (aka. switcher)
 static handle      DrawingContext;  // Drawing context for double-buffered drawing of main window
 static handle      DrawingBitmap;   // Off-screen bitmap used for double-buffered drawing of main window
 static RECT        DrawingRect;     // Size of the off-screen bitmap
-static u16         Keyboard[16];    // 256 bits to track key repeat for low-level keyboard hook
 static i32         MouseX, MouseY;  // Mouse position, for highlighting and clicking app icons in switcher
 
-static struct config Config = { // cmdtab settings
-	// Hotkeys
-	.hotkeyForApps =    { 0x38, 0x0F }, // Alt-Tab in scancodes, must be updated during runtime, see InitConfig
-	.hotkeyForWindows = { 0x38, 0x29 }, // Alt-Tilde/Backquote in scancodes, must be updated during runtime, see InitConfig
-	// Behavior
-	.askAutorun              = true,
-	.switchApps              = true,
-	.switchWindows           = true,
-	.fastSwitchingForApps    = false,
-	.fastSwitchingForWindows = true,
-	.showSwitcherForApps     = true,
-	.showSwitcherForWindows  = false,
-	.wrapbump                = true,
-	// Appearance
-	.darkmode                = false,
-	.switcherHeight          = 128,
-	.switcherHorzMargin      =  24,
-	.switcherVertMargin      =  32,
-	.iconWidth               =  64,
-	.iconHorzPadding         =   8,
-	// Blacklist
-	.blacklist = {
-		{ null,                       L"ApplicationFrameWindow" },
-		{ L"SearchHost",              L"Windows.UI.Core.CoreWindow" },
-		{ L"StartMenuExperienceHost", L"Windows.UI.Core.CoreWindow" },
-	},
-};
+//================
+// Initialization
+//================
 
 static void InitConfig(void)
 {
+	// Default/static cmdtab settings
+	Config = (struct ini){
+		// Hotkeys
+		.hotkeyForApps =    { 0x38, 0x0F, true }, // Alt-Tab in scancodes, must be updated during runtime, see InitConfig
+		.hotkeyForWindows = { 0x38, 0x29, true }, // Alt-Tilde/Backquote in scancodes, must be updated during runtime, see InitConfig
+		// Behavior
+		.askAutorun              = true,
+		.groupByApp				 = true,
+		.fastSwitchingForApps    = false,
+		.fastSwitchingForWindows = true,
+		.showSwitcherForApps     = true,
+		.showSwitcherForWindows  = false,
+		.wrapbump                = true,
+		// Appearance
+		.darkmode                = false,
+		.switcherHeight          = 128,
+		.switcherHorzMargin      =  24,
+		.switcherVertMargin      =  32,
+		.iconWidth               =  64,
+		.iconHorzPadding         =   8,
+		// Blacklist
+		.blacklist = {
+			{ null,                       L"ApplicationFrameWindow" },
+			{ L"SearchHost",              L"Windows.UI.Core.CoreWindow" },
+			{ L"StartMenuExperienceHost", L"Windows.UI.Core.CoreWindow" },
+		},
+	};
 	// Initialize runtime-dependent settings, like those dependent on user's current kbd layout
 	// The default key2 is scan code 0x29 (hex) / 41 (decimal)
 	// This is the key that is physically below Esc, left of 1 and above Tab
@@ -638,9 +645,130 @@ static void InitConfig(void)
 	Config.hotkeyForApps.key = MapVirtualKeyW(Config.hotkeyForApps.key, MAPVK_VSC_TO_VK_EX);
 	Config.hotkeyForWindows.mod = MapVirtualKeyW(Config.hotkeyForWindows.mod, MAPVK_VSC_TO_VK_EX);
 	Config.hotkeyForWindows.key = MapVirtualKeyW(Config.hotkeyForWindows.key, MAPVK_VSC_TO_VK_EX);
+
 	Config.darkmode = IsDarkModeEnabled();
+
 	Print(L"darkmode %s\n", Config.darkmode ? L"YES" : L"NO");
 }
+
+static bool HasDebugLaunchArgument(u16 *args)
+{
+	return !!wcsstr(args, L"--debug");
+}
+
+static bool HasAutorunLaunchArgument(u16 *args)
+{
+	return !!wcsstr(args, L"--autorun");
+}
+
+static void AskAutorun(void)
+{
+	#ifndef _DEBUG // Can't be bothered to be asked about this every single debug run
+	SetAutorun(Ask(Switcher, L"Start cmdtab automatically?\nRelaunch cmdtab.exe to change your mind."), L"cmdtab", L"--autorun");
+	#endif
+}
+
+static bool AlreadyRunning(void)
+{
+	Mutex = CreateMutexW(null, true, L"cmdtabMutex");
+	return GetLastError() == ERROR_ALREADY_EXISTS;
+}
+
+static void QuitSecondInstance(void)
+{
+	MessageBoxW(null, L"cmdtab is already running.", L"cmdtab", MB_OK | MB_ICONINFORMATION | MB_TASKMODAL);
+	ExitProcess(0);
+}
+
+static void InitWindowActivationTracking(WINEVENTPROC eventHookProc)
+{
+	// Install event hooks for foreground window changes. Raymond Chen: https://devblogs.microsoft.com/oldnewthing/20130930-00/?p=3083
+	HistoryHooks[0] = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, null, eventHookProc, 0, 0, WINEVENT_OUTOFCONTEXT);
+	HistoryHooks[1] = SetWinEventHook(EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_UNCLOAKED, null, eventHookProc, 0, 0, WINEVENT_OUTOFCONTEXT);
+}
+
+static void InitKeyboardHook(HOOKPROC keyboardHookProc)
+{
+	// Install keyboard hook
+	KeyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, keyboardHookProc, null, 0);
+}
+
+static void InitSwitcherWindow(handle instance, WNDPROC switcherWindowProc)
+{
+	// Create switcher window
+	WNDCLASSEXW wcex = {0};
+	wcex.cbSize = sizeof wcex;
+	wcex.lpfnWndProc = switcherWindowProc;
+	wcex.hInstance = instance;
+	wcex.hCursor = LoadCursorW(null, IDC_ARROW);
+	wcex.lpszClassName = L"cmdtabSwitcher";
+	// TOOLWINDOW so the switcher itself does not appear as an Alt-Tab window (see IsAltTabWindow)
+	Switcher = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, MAKEINTATOM(RegisterClassExW(&wcex)), null, 0, 0, 0, 0, 0, null, null, instance, null);
+	// Clear all window styles for very plain window
+	SetWindowLongW(Switcher, GWL_STYLE, 0);
+	// Rounded window corners
+	DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_ROUND;
+	DwmSetWindowAttribute(Switcher, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof corners);
+}
+
+static LRESULT CALLBACK SwitcherWindowProcedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
+static VOID    CALLBACK EventHookProcedure(HWINEVENTHOOK hook, ULONG event, HWND hwnd, LONG objectid, LONG childid, ULONG threadid, ULONG timestamp);
+static LRESULT CALLBACK KeyboardHookProcedure(INT code, WPARAM wparam, LPARAM lparam);
+
+static int RunCmdTab(handle instance, u16 *args)
+{
+	// Initialize runtime-dependent settings, for example dependent on user's current kbd layout
+	InitConfig();
+
+	if (!HasAutorunLaunchArgument(args) && Config.askAutorun) {
+		AskAutorun();
+	}
+
+	if (AlreadyRunning()) {
+		QuitSecondInstance();
+	}
+
+	//
+	i32 _ = CoInitialize(null);
+
+	InitSwitcherWindow(instance, SwitcherWindowProcedure);
+
+	InitWindowActivationTracking(EventHookProcedure);
+
+	InitKeyboardHook(KeyboardHookProcedure);
+
+	// Run message loop
+	for (MSG msg; GetMessageW(&msg, Switcher, 0, 0) > 0;) DispatchMessageW(&msg); // Not handling -1 errors. Whatever
+
+	// Uninstall keyboard & event hooks
+	UnhookWindowsHookEx(KeyboardHook);
+	UnhookWinEvent(HistoryHooks[1]);
+	UnhookWinEvent(HistoryHooks[0]);
+
+	//
+	CoUninitialize();
+
+	if (Mutex) ReleaseMutex(Mutex);
+
+	Print(L"cmdtab quit\n");
+	bool hasLeaks = _CrtDumpMemoryLeaks();
+	Print(L"leaks? %s\n", hasLeaks ? L"YES" : L"No leaks.");
+	return hasLeaks;
+}
+
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nShowCmd)
+{
+	return RunCmdTab(hInstance, lpCmdLine);
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
+{
+	return RunCmdTab(hInstance, GetCommandLineW());
+}
+
+//=============
+// Application
+//=============
 
 static void PrintApps(void)
 {
@@ -849,7 +977,15 @@ static void UpdateApps(void)
 	i64 start = StartMeasuring();
 	int windowsCount = 0;
 	AppsCount = 0;
+	// Add all running windows on the system to the Apps array, filtering unwanted
+	// windows and grouping them by app
+	// EnumWindows enumerates windows by Z-order, not activation order
 	EnumWindows(_AddToSwitcher, (LPARAM)&windowsCount); // _AddToSwitcher calls AddToSwitcher with every top-level window enumerated by EnumWindows
+	// Now run all added windows through our own History record, sorting them
+	// by the order we've observed them to be activated
+	// First time this function is called we may not have observed any window
+	// activations yet, but we know that the foreground window is the most
+	// recently activated window
 	AddToHistory(GetForegroundWindow()); // "Activate" foreground window to record it in window activation history
 	for (int i = HistoryCount-1; i >= 0; i--) {
 		ActivateWindow(History[i]);
@@ -860,14 +996,16 @@ static void UpdateApps(void)
 
 static void SelectFirstApp(void)
 {
+	// Contrary to 0da13fd's commit message, this function is not split into
+	// *App and *Window variants like the SelectNext* functions below are
 	/*dbg*/ handle *oldWindow = SelectedWindow;
 	if (AppsCount > 0) {
 		SelectedApp = &Apps[0];
 		SelectedWindow = &Apps[0].windows[0];
 	} else {
-		Print(L"nothing to select\n");
 		SelectedApp = null;
 		SelectedWindow = null;
+		Print(L"nothing to select\n");
 	}
 	/*dbg*/
 	if (oldWindow != SelectedWindow) {
@@ -932,9 +1070,9 @@ static void SelectNextWindow(bool reverse, bool wrap)
 static void ResizeSwitcher(void)
 {
 	// Use the monitor where the mouse pointer is currently placed (#5)
-	POINT mousePos = { 0 };
+	POINT mousePos = {0};
+	MONITORINFO mi = {.cbSize = sizeof mi};
 	GetCursorPos(&mousePos);
-	MONITORINFO mi = { .cbSize = sizeof(MONITORINFO) };
 	GetMonitorInfoW(MonitorFromPoint(mousePos, MONITOR_DEFAULTTONEAREST), &mi);
 
 	u32   iconsWidth = AppsCount * Config.iconWidth;
@@ -972,10 +1110,10 @@ static void RedrawSwitcher(void)
 	#define HIGHLIGHT    RGB(76, 194, 255) // Sampled from Windows 11 Alt-Tab
 	#define HIGHLIGHT_BG RGB(11, 11, 11) // Sampled from Windows 11 Alt-Tab
 
-	u32 ICON_WIDTH = 64;
-	u32 ICON_PAD   =  8;
-	u32 HORZ_PAD   = 24;
-	u32 VERT_PAD   = 32;
+	u32 ICON_WIDTH = Config.iconWidth;
+	u32 ICON_PAD = Config.iconHorzPadding;
+	u32 HORZ_PAD = Config.switcherHorzMargin;
+	u32 VERT_PAD = Config.switcherVertMargin;
 
 	#define SEL_OUTLINE   3
 	#define SEL_RADIUS   10
@@ -1102,8 +1240,8 @@ static void SendModKeysUp(void)
 {
 	SendInput(2,
 		(INPUT[]) {
-		(INPUT){.type = INPUT_KEYBOARD, .ki.wVk = Config.hotkeyForApps.mod, .ki.dwFlags = KEYEVENTF_KEYUP},
-		(INPUT){.type = INPUT_KEYBOARD, .ki.wVk = Config.hotkeyForWindows.mod, .ki.dwFlags = KEYEVENTF_KEYUP},
+			(INPUT){.type = INPUT_KEYBOARD, .ki.wVk = Config.hotkeyForApps.mod, .ki.dwFlags = KEYEVENTF_KEYUP},
+			(INPUT){.type = INPUT_KEYBOARD, .ki.wVk = Config.hotkeyForWindows.mod, .ki.dwFlags = KEYEVENTF_KEYUP},
 		},
 		sizeof(INPUT));
 }
@@ -1111,10 +1249,8 @@ static void SendModKeysUp(void)
 static void ShowSwitcher(void)
 {
 	ReceiveLastInputEvent();
-	if (SetForegroundWindow(GetLastActivePopup(Switcher))) {
-		LockSetForegroundWindow(LSFW_LOCK);
-		ShowWindow(Switcher, SW_SHOWNA);
-	}
+	ShowWindowX(Switcher);
+	LockSetForegroundWindow(LSFW_LOCK);
 }
 
 static void CancelSwitcher(void)
@@ -1173,15 +1309,13 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 	u32 keyCode = kbd->vkCode;
 	bool keyDown = !(bool)(kbd->flags & LLKHF_UP);
 
-	bool injected = (kbd->flags & LLKHF_INJECTED) == LLKHF_INJECTED;
+	// As a sledgehammer to avoid stuck mod keys, I send mod keyups.
+	// This kbd hook is then sent that mod keyup which would close the
+	// switcher. But we need to avoid that, so we skip events that are
+	// injected mod keyups.
+	bool injected = (kbd->flags & LLKHF_INJECTED);
 	if (injected && !keyDown && (keyCode == Config.hotkeyForApps.mod || keyCode == Config.hotkeyForWindows.mod)) {
-		// As a sledgehammer to avoid stuck mod keys, I send mod keyups.
-		// This kbd hook is then sent that mod keyup which would close the
-		// switcher. But we need to avoid that, so we skip events that are
-		// injected mod keyups.
-		u16 keyName[32] = {0};
-		int length = GetKeyNameTextW(kbd->scanCode << 16, keyName, countof(keyName));
-		Print(L"skip INJECTED INPUT %s %s\n", keyCode ? keyName : L"", keyCode ? keyDown ? L"down" : L"up" : L"");
+		Print(L"skip INJECTED INPUT %u %s\n", keyCode, keyDown ? L"down" : L"up");
 		goto passMessage;
 	}
 
@@ -1195,19 +1329,18 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 		// Activation
 		// ========================================
 
-		bool key1Down = keyCode == Config.hotkeyForApps.key && keyDown;
-		bool key2Down = keyCode == Config.hotkeyForWindows.key && keyDown;
-		bool mod1Held = IsKeyDown(Config.hotkeyForApps.mod);
-		bool mod2Held = IsKeyDown(Config.hotkeyForWindows.mod);
+		bool hotkeyForApps =
+			keyCode == Config.hotkeyForApps.key && keyDown &&
+			IsKeyDown(Config.hotkeyForApps.mod) &&
+			Config.hotkeyForApps.enabled;
 
 		// First Alt-Tab
-		if (key1Down && mod1Held && Config.switchApps) {
+		if (hotkeyForApps) {
 			UpdateApps();
 			if (AppsCount <= 0) {
 				Print(L"no apps\n");
 				goto passMessage;
 			}
-			//PostMessageW(GetForegroundWindow(), WM_SYSCOMMAND, SC_KEYMENU, 0);
 			SelectFirstApp(); // Initialize selection
 			if (*SelectedWindow == GetCoreWindow(GetForegroundWindow())) { // Don't select next when on blank desktop
 				SelectNextApp(shiftHeld, !Config.wrapbump || !keyRepeat);
@@ -1218,20 +1351,26 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				ShowSwitcher();
 			}
 			if (Config.fastSwitchingForApps) {
+				ReceiveLastInputEvent();
 				ShowWindowX(*SelectedWindow);
 			}
 			// Since I "own" this hotkey system-wide, I consume this message unconditionally
 			// This will consume the key1Down event. Windows will not know that key1 was pressed
 			goto consumeMessage;
 		}
+
+		bool hotkeyForWindows =
+			keyCode == Config.hotkeyForWindows.key && keyDown &&
+			IsKeyDown(Config.hotkeyForWindows.mod) &&
+			Config.hotkeyForWindows.enabled;
+
 		// First Alt-Tilde/Backquote
-		if (key2Down && mod2Held && Config.switchWindows) {
+		if (hotkeyForWindows) {
 			UpdateApps();
 			if (AppsCount <= 0) {
 				Print(L"no apps\n");
 				goto passMessage;
 			}
-			//PostMessageW(GetForegroundWindow(), WM_SYSCOMMAND, SC_KEYMENU, 0);
 			SelectFirstApp(); // Initialize selection
 			SelectNextWindow(shiftHeld, !Config.wrapbump || !keyRepeat);
 			if (Config.showSwitcherForWindows) {
@@ -1240,6 +1379,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				ShowSwitcher();
 			}
 			if (Config.fastSwitchingForWindows) {
+				ReceiveLastInputEvent();
 				ShowWindowX(*SelectedWindow);
 			}
 			// Since I "own" this hotkey system-wide, I consume this message unconditionally
@@ -1247,7 +1387,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			goto consumeMessage;
 		}
 
-	} else { // if (SelectedWindow) {
+	} else { // (SelectedWindow != NULL) means switcher is active/visible
 
 		// ========================================
 		// Deactivation
@@ -1257,7 +1397,6 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 		bool mod2Up = keyCode == Config.hotkeyForWindows.mod && !keyDown;
 
 		if (mod1Up || mod2Up) {
-			Print(L"hide\n");
 			// Mod keyup - switch to selected window
 			// Always pass/never consume mod key up, because:
 			// 1) cmdtab never hooks mod keydowns
@@ -1268,10 +1407,11 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			// these mod keyups and manually send mod keyups. I dunno why.
 			SendModKeysUp();
 			if (GetForegroundWindow() != *SelectedWindow) {
+				ReceiveLastInputEvent();
 				ShowWindowX(*SelectedWindow);
 			}
 			CancelSwitcher();
-			goto consumeMessage; // See note above on "Alt keyup" on why I don't consume this message
+			goto consumeMessage;
 		} else {
 
 			bool keyRepeat = SetKey(keyCode, keyDown); // Manually track key repeat
@@ -1454,6 +1594,7 @@ static i64 OnSwitcherCreate(void)
 {
 	// Make the codepath hot to prevent kbd hook from timing out on first use
 	UpdateApps();
+	return 1;
 }
 
 static i64 OnSwitcherPaint(void)
@@ -1470,6 +1611,7 @@ static i64 OnSwitcherPaint(void)
 		BitBlt(ps.hdc, 0, 0, DrawingRect.right - DrawingRect.left, DrawingRect.bottom - DrawingRect.top, DrawingContext, 0, 0, SRCCOPY);
 		EndPaint(Switcher, &ps);
 	}
+	return 1;
 }
 
 static i64 OnSwitcherFocusChange(bool focused)
@@ -1501,10 +1643,10 @@ static i64 OnSwitcherMouseMove(int x, int y)
 
 	// Iteration logic copy/pasted from RedrawSwitcher, so if something changes
 	// there update this:
-	u32 ICON_WIDTH = 64;
-	u32 ICON_PAD   =  8;
-	u32 HORZ_PAD   = 24;
-	u32 VERT_PAD   = 32;
+	u32 ICON_WIDTH = Config.iconWidth;
+	u32 ICON_PAD = Config.iconHorzPadding;
+	u32 HORZ_PAD = Config.switcherHorzMargin;
+	u32 VERT_PAD = Config.switcherVertMargin;
 
 	for (int i = 0; i < AppsCount; i++) {
 		struct app *app = &Apps[i];
@@ -1530,11 +1672,13 @@ static i64 OnSwitcherMouseMove(int x, int y)
 			RedrawSwitcher();
 		}
 	}
+	return 1;
 }
 
 static i64 OnSwitcherMouseLeave(void)
 {
 	OnSwitcherMouseMove(0, 0);
+	return 1;
 }
 
 static i64 OnSwitcherMouseUp(void)
@@ -1546,6 +1690,7 @@ static i64 OnSwitcherMouseUp(void)
 		ShowWindowX(*SelectedWindow);
 	}
 	CancelSwitcher();
+	return 1;
 }
 
 static i64 OnSwitcherClose(void)
@@ -1554,14 +1699,16 @@ static i64 OnSwitcherClose(void)
 	if (Ask(Switcher, L"Quit cmdtab?")) {
 		DestroyWindow(Switcher);
 	}
+	return 1;
 }
 
 static i64 OnShellWindowActivated(handle hwnd)
 {
 	AddToHistory(hwnd);
+	return 1;
 }
 
-static i64 SwitcherWindowProcedure(handle hwnd, u32 message, u64 wparam, i64 lparam)
+static LRESULT CALLBACK SwitcherWindowProcedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 {
 	switch (message) {
 		case WM_CREATE:
@@ -1595,99 +1742,4 @@ static VOID CALLBACK EventHookProcedure(HWINEVENTHOOK hook, ULONG event, HWND hw
 			OnShellWindowActivated(hwnd);
 			break;
 	}
-}
-
-static bool HasAutorunLaunchArgument(u16 *args)
-{
-	return !wcscmp(args, L"--autorun");
-}
-
-static void AskAutorun(void)
-{
-	#ifndef _DEBUG // Can't be bothered to be asked about this every single debug run
-	SetAutorun(Ask(Switcher, L"Start cmdtab automatically?\nRelaunch cmdtab.exe to change your mind."), L"cmdtab", L"--autorun");
-	#endif
-}
-
-static bool AlreadyRunning(handle *mutex)
-{
-	*mutex = CreateMutexW(null, true, L"cmdtabMutex");
-	return GetLastError() == ERROR_ALREADY_EXISTS;
-}
-
-static void QuitSecondInstance(void)
-{
-	MessageBoxW(null, L"cmdtab is already running.", L"cmdtab", MB_OK | MB_ICONINFORMATION | MB_TASKMODAL);
-	ExitProcess(0);
-}
-
-static int RunCmdTab(handle instance, u16 *args)
-{
-	handle mutex;
-	//handle mainWindow; // aka. 'Switcher'
-	handle keyboardHook, eventHook1, eventHook2;
-
-	if (!HasAutorunLaunchArgument(args) && Config.askAutorun) {
-		AskAutorun();
-	}
-	if (AlreadyRunning(&mutex)) {
-		QuitSecondInstance();
-	}
-
-	//
-	i32 _ = CoInitialize(null);
-
-	// Initialize runtime-dependent settings, for example dependent on user's current kbd layout
-	InitConfig();
-
-	// Create switcher window
-	WNDCLASSEXW wcex = {0};
-	wcex.cbSize = sizeof wcex;
-	wcex.lpfnWndProc = (WNDPROC)SwitcherWindowProcedure;
-	wcex.hInstance = instance;
-	wcex.hCursor = LoadCursorW(null, IDC_ARROW);
-	wcex.lpszClassName = L"cmdtabSwitcher";
-	Switcher = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, MAKEINTATOM(RegisterClassExW(&wcex)), null, 0, 0, 0, 0, 0, null, null, instance, null);
-	// Clear all window styles for very plain window
-	SetWindowLongW(Switcher, GWL_STYLE, 0);
-	// Rounded window corners
-	DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_ROUND;
-	DwmSetWindowAttribute(Switcher, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof corners);
-
-	// Install keyboard hook and event hooks for foreground window changes. Raymond Chen: https://devblogs.microsoft.com/oldnewthing/20130930-00/?p=3083
-	keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, (HOOKPROC)KeyboardHookProcedure, null, 0);
-	eventHook1 = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, null, EventHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
-	eventHook2 = SetWinEventHook(EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_UNCLOAKED, null, EventHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
-
-	// Run message loop
-	for (MSG msg; GetMessageW(&msg, Switcher, 0, 0) > 0;) DispatchMessageW(&msg); // Not handling -1 errors. Whatever
-
-	// Uninstall keyboard & event hooks
-	UnhookWindowsHookEx(keyboardHook);
-	UnhookWinEvent(eventHook1);
-	UnhookWinEvent(eventHook2);
-
-	//
-	CoUninitialize();
-
-	if (mutex) ReleaseMutex(mutex);
-
-	Print(L"cmdtab quit\n");
-	bool hasLeaks = _CrtDumpMemoryLeaks();
-	return hasLeaks;
-}
-
-int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine, _In_ int nShowCmd)
-{
-	//#ifdef _DEBUG
-	//FILE *conout = null;
-	//AllocConsole();
-	//freopen_s(&conout, "CONOUT$", "w", stdout);
-	//#endif
-	return RunCmdTab(hInstance, lpCmdLine);
-}
-
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
-{
-	return RunCmdTab(hInstance, GetCommandLineW());
 }
