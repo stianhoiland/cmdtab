@@ -467,6 +467,7 @@ static void SetAutorun(bool enabled, u16 *keyname, u16 *args)
 		success = RegDeleteValueW(regkey, keyname);
 		success = RegCloseKey(regkey);
 	}
+	(void)success;
 }
 
 static bool IsKeyDown(u32 key)
@@ -609,6 +610,10 @@ static i32         MouseX, MouseY;  // Mouse position, for highlighting and clic
 // Initialization
 //================
 
+static LRESULT CALLBACK SwitcherWindowProcedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
+static VOID    CALLBACK EventHookProcedure(HWINEVENTHOOK hook, ULONG event, HWND hwnd, LONG objectid, LONG childid, ULONG threadid, ULONG timestamp);
+static LRESULT CALLBACK KeyboardHookProcedure(INT code, WPARAM wparam, LPARAM lparam);
+
 static void InitConfig(void)
 {
 	// Default/static cmdtab settings
@@ -680,25 +685,25 @@ static void QuitSecondInstance(void)
 	ExitProcess(0);
 }
 
-static void InitWindowActivationTracking(WINEVENTPROC eventHookProc)
+static void InitWindowActivationTracking(void)
 {
 	// Install event hooks for foreground window changes. Raymond Chen: https://devblogs.microsoft.com/oldnewthing/20130930-00/?p=3083
-	HistoryHooks[0] = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, null, eventHookProc, 0, 0, WINEVENT_OUTOFCONTEXT);
-	HistoryHooks[1] = SetWinEventHook(EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_UNCLOAKED, null, eventHookProc, 0, 0, WINEVENT_OUTOFCONTEXT);
+	HistoryHooks[0] = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, null, EventHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
+	HistoryHooks[1] = SetWinEventHook(EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_UNCLOAKED, null, EventHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
 }
 
-static void InitKeyboardHook(HOOKPROC keyboardHookProc)
+static void InitKeyboardHook(void)
 {
 	// Install keyboard hook
-	KeyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, keyboardHookProc, null, 0);
+	KeyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHookProcedure, null, 0);
 }
 
-static void InitSwitcherWindow(handle instance, WNDPROC switcherWindowProc)
+static void InitSwitcherWindow(handle instance)
 {
 	// Create switcher window
 	WNDCLASSEXW wcex = {0};
 	wcex.cbSize = sizeof wcex;
-	wcex.lpfnWndProc = switcherWindowProc;
+	wcex.lpfnWndProc = SwitcherWindowProcedure;
 	wcex.hInstance = instance;
 	wcex.hCursor = LoadCursorW(null, IDC_ARROW);
 	wcex.lpszClassName = L"cmdtabSwitcher";
@@ -711,10 +716,6 @@ static void InitSwitcherWindow(handle instance, WNDPROC switcherWindowProc)
 	DwmSetWindowAttribute(Switcher, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof corners);
 }
 
-static LRESULT CALLBACK SwitcherWindowProcedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
-static VOID    CALLBACK EventHookProcedure(HWINEVENTHOOK hook, ULONG event, HWND hwnd, LONG objectid, LONG childid, ULONG threadid, ULONG timestamp);
-static LRESULT CALLBACK KeyboardHookProcedure(INT code, WPARAM wparam, LPARAM lparam);
-
 static int RunCmdTab(handle instance, u16 *args)
 {
 	// Initialize runtime-dependent settings, for example dependent on user's current kbd layout
@@ -723,7 +724,6 @@ static int RunCmdTab(handle instance, u16 *args)
 	if (!HasAutorunLaunchArgument(args) && Config.askAutorun) {
 		AskAutorun();
 	}
-
 	if (AlreadyRunning()) {
 		QuitSecondInstance();
 	}
@@ -731,11 +731,9 @@ static int RunCmdTab(handle instance, u16 *args)
 	//
 	i32 _ = CoInitialize(null);
 
-	InitSwitcherWindow(instance, SwitcherWindowProcedure);
-
-	InitWindowActivationTracking(EventHookProcedure);
-
-	InitKeyboardHook(KeyboardHookProcedure);
+	InitSwitcherWindow(instance);
+	InitWindowActivationTracking();
+	InitKeyboardHook();
 
 	// Run message loop
 	for (MSG msg; GetMessageW(&msg, Switcher, 0, 0) > 0;) DispatchMessageW(&msg); // Not handling -1 errors. Whatever
@@ -1406,10 +1404,8 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			// So after much experimentation it seems to work best to consume
 			// these mod keyups and manually send mod keyups. I dunno why.
 			SendModKeysUp();
-			if (GetForegroundWindow() != *SelectedWindow) {
-				ReceiveLastInputEvent();
-				ShowWindowX(*SelectedWindow);
-			}
+			ReceiveLastInputEvent();
+			ShowWindowX(*SelectedWindow);
 			CancelSwitcher();
 			goto consumeMessage;
 		} else {
@@ -1631,15 +1627,27 @@ static i64 OnSwitcherFocusChange(bool focused)
 		// (i.e. not becoming foreground)--it's a little unorthodox.
 		// But for now that's how it is.
 		Print(L"switcher lost focus\n");
+		MouseX = 0;
+		MouseY = 0;
 		return 1; // Nu-uh!
 	}
 }
 
 static i64 OnSwitcherMouseMove(int x, int y)
 {
-	MouseX = x; // GetMessagePos
+	// The switcher window is sent a mouse move event if the mouse happens to be
+	// over the window on window show. So this is to prevent accidental mouse
+	// selection.
+	// This depends on setting MouseX&Y to 0 at init (already happens because
+	// static) and when the switcher becomes inactive
+	// Atm resetting is done in OnSwitcherFocusChange, but could be done in CloseSwitcher
+	bool skip = !MouseX && !MouseY;
+	MouseX = x;
 	MouseY = y;
 	//Print(L"x%i y%i\n", MouseX, MouseY);
+	if (skip) {
+		return 0;
+	}
 
 	// Iteration logic copy/pasted from RedrawSwitcher, so if something changes
 	// there update this:
@@ -1662,6 +1670,11 @@ static i64 OnSwitcherMouseMove(int x, int y)
 		i32 height = ICON_WIDTH;
 		i32  right = left + width;
 		i32 bottom = top + height;
+
+		// Vertically extend selection area to top and bottom for uSaBiLiTy
+		top = 0;
+		height = Config.switcherHeight;
+		bottom = top + height;
 
 		bool mouseIsOverIcon = PtInRect(&(RECT){left, top, right, bottom}, (POINT){MouseX, MouseY});
 		if (mouseIsOverIcon && SelectedApp != app) {
