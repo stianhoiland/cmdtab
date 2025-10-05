@@ -42,6 +42,7 @@
 #include <initguid.h>
 #include <commoncontrols.h>
 #include <mmsystem.h> // PlaySound
+#include <shellscalingapi.h> // GetDpiForMonitor
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "shlwapi.lib") // Only used by StringFileName for PathFindFileNameW?
@@ -49,6 +50,7 @@
 #pragma comment(lib, "pathcch.lib")
 #pragma comment(lib, "version.lib")
 #pragma comment(lib, "winmm.lib") // PlaySound
+#pragma comment(lib, "shcore.lib") // GetDpiForMonitor
 
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='amd64' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
@@ -551,6 +553,16 @@ static void TerminateWindowProcess(handle hwnd)
 	if (process) CloseHandle(process);
 }
 
+static u32 GetDpiForMouseMonitor(void)
+{
+	POINT mousePos = {0};
+	GetCursorPos(&mousePos);
+	HMONITOR mouseMonitor = MonitorFromPoint(mousePos, MONITOR_DEFAULTTONEAREST);
+	UINT dpiX, dpiY;
+	GetDpiForMonitor(mouseMonitor, 0, &dpiX, &dpiY);
+	return (u32)dpiX;
+}
+
 //==============================================================================
 // cmdtab impl
 //==============================================================================
@@ -605,6 +617,7 @@ static handle      Switcher;        // Handle for main window (aka. switcher)
 static handle      DrawingContext;  // Drawing context for double-buffered drawing of main window
 static handle      DrawingBitmap;   // Off-screen bitmap used for double-buffered drawing of main window
 static RECT        DrawingRect;     // Size of the off-screen bitmap
+static f32         DrawingScale;    // DPI scale of the monitor where the cursor is, which is where the switcher will de displayed
 static i32         MouseX, MouseY;  // Mouse position, for highlighting and clicking app icons in switcher
 
 //================
@@ -1068,9 +1081,8 @@ static void SelectNextWindow(bool reverse, bool wrap)
 
 static void ResizeSwitcher(void)
 {
-	// TODO Promote to file-scope
-	u32 dpi = GetDpiForWindow(Switcher);
-	f32 scale = (f32)dpi / 96.0f;
+	// Get DPI of monitor where the mouse pointer is
+	DrawingScale = GetDpiForMouseMonitor() / 96.0;
 
 	// Use the monitor where the mouse pointer is currently placed (#5)
 	POINT mousePos = {0};
@@ -1078,25 +1090,17 @@ static void ResizeSwitcher(void)
 	GetCursorPos(&mousePos);
 	GetMonitorInfoW(MonitorFromPoint(mousePos, MONITOR_DEFAULTTONEAREST), &mi);
 
-	u32     iconsWidth = scale * AppsCount * Config.iconWidth;
-	u32   paddingWidth = scale * AppsCount * Config.iconHorzPadding * 2;
-	u32    marginWidth = scale *         2 * Config.switcherHorzMargin;
-	u32 switcherHeight = scale * Config.switcherHeight;
+	u32     iconsWidth = DrawingScale * AppsCount * Config.iconWidth;
+	u32   paddingWidth = DrawingScale * AppsCount * Config.iconHorzPadding * 2;
+	u32    marginWidth = DrawingScale *         2 * Config.switcherHorzMargin;
+	u32 switcherHeight = DrawingScale * Config.switcherHeight;
 
 	u32 w = iconsWidth + paddingWidth + marginWidth;
 	u32 h = switcherHeight;
 	i32 x = mi.rcMonitor.left + (mi.rcMonitor.right - mi.rcMonitor.left - w) / 2;
 	i32 y = mi.rcMonitor.top + (mi.rcMonitor.bottom - mi.rcMonitor.top - h) / 2;
 
-	RECT window = {0};
-	window.left = x;
-	window.top = y;
-	window.right = w + window.left;
-	window.bottom = h + window.top;
-
-	AdjustWindowRectExForDpi(&window, GetWindowLongW(Switcher, GWL_STYLE), 0, GetWindowLongW(Switcher, GWL_EXSTYLE), dpi);
-
-	MoveWindow(Switcher, window.left, window.top, window.right - window.left, window.bottom - window.top, false); // Yes, "MoveWindow" means "ResizeWindow"
+	MoveWindow(Switcher, x, y, w, h, false); // Yes, "MoveWindow" means "ResizeWindow"
 
 	// Resize off-screen double-buffering bitmap
 	RECT resized = {x, y, x+w, y+h};
@@ -1115,10 +1119,6 @@ static void ResizeSwitcher(void)
 
 static void RedrawSwitcher(void)
 {
-	// TODO Promote to file-scope
-	u32 dpi = GetDpiForWindow(Switcher);
-	f32 scale = (f32)dpi / 96.0f;
-
 	// TODO Use 'Config.style'
 
 	#define BACKGROUND   RGB(32, 32, 32) // dark mode?
@@ -1126,15 +1126,15 @@ static void RedrawSwitcher(void)
 	#define HIGHLIGHT    RGB(76, 194, 255) // Sampled from Windows 11 Alt-Tab
 	#define HIGHLIGHT_BG RGB(11, 11, 11) // Sampled from Windows 11 Alt-Tab
 
-	u32 ICON_WIDTH = scale * Config.iconWidth;
-	u32 ICON_PAD   = scale * Config.iconHorzPadding;
-	u32 HORZ_PAD   = scale * Config.switcherHorzMargin;
-	u32 VERT_PAD   = scale * Config.switcherVertMargin;
+	u32 ICON_WIDTH = DrawingScale * Config.iconWidth;
+	u32 ICON_PAD   = DrawingScale * Config.iconHorzPadding;
+	u32 HORZ_PAD   = DrawingScale * Config.switcherHorzMargin;
+	u32 VERT_PAD   = DrawingScale * Config.switcherVertMargin;
 
-	u32 SEL_OUTLINE  = scale *  3.5;
-	u32 SEL_RADIUS   = scale * 10;
-	u32 SEL_VERT_OFF = scale * 10; // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
-	u32 SEL_HORZ_OFF = scale *  6; // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
+	u32 SEL_OUTLINE  = DrawingScale *  3.5;
+	u32 SEL_RADIUS   = DrawingScale * 10;
+	u32 SEL_VERT_OFF = DrawingScale * 10; // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
+	u32 SEL_HORZ_OFF = DrawingScale *  6; // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
 
 	static HBRUSH windowBackground = {0};
 	static HBRUSH selectionBackground = {0};
@@ -1611,6 +1611,12 @@ static i64 OnSwitcherCreate(void)
 	return 1;
 }
 
+static i64 OnSwitcherDPIChanged(u16 newDPI, RECT newRect)
+{
+	Print(L"WM_DPICHANGED, current scale: %f, new scale: %f\n", DrawingScale, newDPI / 96.0);
+	return 1;
+}
+
 static i64 OnSwitcherPaint(void)
 {
 	// Double buffered drawing, just blit the DrawingContext
@@ -1667,17 +1673,13 @@ static i64 OnSwitcherMouseMove(int x, int y)
 		return 0;
 	}
 
-	// TODO Promote to file-scope
-	u32 dpi = GetDpiForWindow(Switcher);
-	f32 scale = (f32)dpi / 96.0f;
-
 	// Iteration logic copy/pasted from RedrawSwitcher, so if something changes
 	// there update this:
 
-	u32 ICON_WIDTH = scale * Config.iconWidth;
-	u32 ICON_PAD   = scale * Config.iconHorzPadding;
-	u32 HORZ_PAD   = scale * Config.switcherHorzMargin;
-	u32 VERT_PAD   = scale * Config.switcherVertMargin;
+	u32 ICON_WIDTH = DrawingScale * Config.iconWidth;
+	u32 ICON_PAD   = DrawingScale * Config.iconHorzPadding;
+	u32 HORZ_PAD   = DrawingScale * Config.switcherHorzMargin;
+	u32 VERT_PAD   = DrawingScale * Config.switcherVertMargin;
 
 	for (int i = 0; i < AppsCount; i++) {
 		struct app *app = &Apps[i];
@@ -1749,6 +1751,8 @@ static LRESULT CALLBACK SwitcherWindowProcedure(HWND hwnd, UINT message, WPARAM 
 	switch (message) {
 		case WM_CREATE:
 			return OnSwitcherCreate();
+	    case WM_DPICHANGED:
+	    	return OnSwitcherDPIChanged(LOWORD(wparam), *(RECT*)lparam);
 		case WM_PAINT:
 			return OnSwitcherPaint();
 		case WM_ACTIVATEAPP:

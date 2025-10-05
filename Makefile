@@ -5,7 +5,7 @@
 CC         = c99
 CFLAGS     = -std=c99
 WARNINGS   = -Wall -Wextra -pedantic -Wno-unused-parameter
-LDLIBS     = -lole32 -lcomctl32 -lgdi32 -lshlwapi -ldwmapi -lpathcch -lversion -lwinmm
+LDLIBS     = -lole32 -lcomctl32 -lgdi32 -lshlwapi -ldwmapi -lpathcch -lversion -lwinmm -lshcore
 
 ifdef RELEASE
 CFLAGS    += -Oz -DNDEBUG=1 -mwindows
