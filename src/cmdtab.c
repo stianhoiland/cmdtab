@@ -585,7 +585,7 @@ struct ini { // cmdtab settings
 	struct { u32 mod, key, enabled; } hotkeyForApps;
 	struct { u32 mod, key, enabled; } hotkeyForWindows;
 	// Behavior
-	bool groupByApp; // TODO Can not disable yet
+	bool groupByApp;
 	bool fastSwitchingForApps;
 	bool fastSwitchingForWindows;
 	bool showSwitcherForApps;
@@ -940,17 +940,35 @@ static void AddToApps(handle hwnd)
 			break;
 		}
 	}
-	// 6. If app not already tracked, create new app entry
-	if (!app) {
+	// 6. If needed, create new app entry
+	if (app && !Config.groupByApp) {
 		if (AppsCount >= countof(Apps)) {
 			Error(Switcher, L"ERROR reached max. apps\n");
 			return;
 		}
+		// This app is already listed, but we're not grouping by app so create
+		// additional entries for each app window and *copy the existing app info*
+		// (except title ofc)
+		struct app *window = &Apps[AppsCount++];
+		if (window->icon) DestroyIcon(window->icon);
+		window->path = app->path;
+		window->name = GetWindowTitle(hwnd);
+		window->icon = app->icon; // TODO Does this lead to double free app->icon?
+		window->windowsCount = 0;
+		//
+		app = window;
+	} else if (!app) {
+		if (AppsCount >= countof(Apps)) {
+			Error(Switcher, L"ERROR reached max. apps\n");
+			return;
+		}
+		string title = Config.groupByApp ? GetAppName(&filepath) : GetWindowTitle(hwnd); // TODO Fall back to app name for empty window titles
+		// This app is not previously added, so create new app entry for it
 		// Since I reset by truncating (setting AppsCount to 0), make sure to overwrite all struct fields when reusing array slots
 		app = &Apps[AppsCount++];
 		if (app->icon) DestroyIcon(app->icon); // In fact, I have to do a little lazy cleanup
 		app->path = filepath;
-		app->name = GetAppName(&filepath);
+		app->name = title;
 		app->icon = GetAppIcon(&filepath);
 		app->windowsCount = 0; // Same truncation trick here (but hwnds are not structs, so no fields to overwrite)
 	}
@@ -958,8 +976,9 @@ static void AddToApps(handle hwnd)
 		Error(Switcher, L"ERROR reached max. windows for app\n");
 		return;
 	}
-	// 7. Add window to app's window list
+	// 7. Add window to app's window list (even if only 1 per entry in case of !Config.groupByApp)
 	app->windows[app->windowsCount++] = hwnd;
+	//
 	Print(L"add window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
 	PrintWindowX(hwnd);
 }
@@ -1073,8 +1092,52 @@ static void SelectNextApp(bool reverse, bool wrap)
 	}
 }
 
+static void SelectSameApp(bool reverse, bool wrap)
+{
+	struct app *firstApp = &Apps[0];
+	struct app  *lastApp = &Apps[AppsCount-1];
+	if (reverse) {
+		for (struct app *app = SelectedApp-1; app >= firstApp; app--) {
+			if (StringsAreEqual(&app->path, &SelectedApp->path)) {
+				SelectedApp = app;
+				SelectedWindow = &SelectedApp->windows[0];
+				return;
+			}
+		}
+		if (!wrap) return;
+		for (struct app *app = lastApp; app > SelectedApp; app--) {
+			if (StringsAreEqual(&app->path, &SelectedApp->path)) {
+				SelectedApp = app;
+				SelectedWindow = &SelectedApp->windows[0];
+				return;
+			}
+		}
+	} else {
+		for (struct app *app = SelectedApp+1; app <= lastApp; app++) {
+			if (StringsAreEqual(&app->path, &SelectedApp->path)) {
+				SelectedApp = app;
+				SelectedWindow = &SelectedApp->windows[0];
+				return;
+			}
+		}
+		if (!wrap) return;
+		for (struct app *app = firstApp; app < SelectedApp; app++) {
+			if (StringsAreEqual(&app->path, &SelectedApp->path)) {
+				SelectedApp = app;
+				SelectedWindow = &SelectedApp->windows[0];
+				return;
+			}
+		}
+	}
+}
+
 static void SelectNextWindow(bool reverse, bool wrap)
 {
+	if (!Config.groupByApp) {
+		SelectSameApp(reverse, wrap);
+		return;
+	}
+
 	//assert(SelectedApp && SelectedWindow);
 	/*dbg*/ handle *oldWindow = SelectedWindow;
 	handle *firstWindow = &SelectedApp->windows[0];
@@ -1341,6 +1404,10 @@ static void SendModKeysUp(void)
 
 static void ShowSelectedWindow(void)
 {
+	///*dbg*/i64 start = StartMeasuring();
+	ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
+	RedrawSwitcher();
+	///*dbg*/Log(L"RedrawSwitcher %llims elapsed\n", FinishMeasuring(start));
 	ReceiveLastInputEvent();
 	ShowWindowX(*SelectedWindow);
 }
