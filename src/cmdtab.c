@@ -648,7 +648,7 @@ static void InitConfig(void)
 		.hotkeyForApps =    { 0x38, 0x0F, true }, // Alt-Tab in scancodes, must be updated during runtime, see InitConfig
 		.hotkeyForWindows = { 0x38, 0x29, true }, // Alt-Tilde/Backquote in scancodes, must be updated during runtime, see InitConfig
 		// Behavior
-		.groupByApp              = true, // TODO Can not disable yet
+		.groupByApp              = true,
 		.fastSwitchingForApps    = false,
 		.fastSwitchingForWindows = true,
 		.showSwitcherForApps     = true,
