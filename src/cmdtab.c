@@ -533,6 +533,8 @@ static void HideWindow(handle hwnd)
 
 static void MinimizeWindow(handle hwnd)
 {
+	Print(L"minimize window ");
+	PrintWindowX(hwnd);
 	PostMessageW(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
 }
 
@@ -591,11 +593,11 @@ struct ini { // cmdtab settings
 	bool wrapbump;
 	// Appearance
 	bool darkmode;
-	u32 switcherHeight;
 	u32 switcherHorzMargin;
 	u32 switcherVertMargin;
-	u32 iconWidth;
+	u32 iconSize;
 	u32 iconHorzPadding;
+	u32 fontSize;
 	// Blacklist
 	struct identifier {
 		u16 *filename;          // Filename without file extension, ex. "explorer". Can be null
@@ -624,8 +626,8 @@ static struct app *SelectedApp;     // Pointer to one of the elements in 'Apps' 
 static handle     *SelectedWindow;  // Currently selected window in switcher. Non-NULL indicates switcher is active
 // GUI
 static handle      Switcher;        // Handle for main window (aka. switcher)
-static handle      DrawingContext;  // Drawing context for double-buffered drawing of main window
-static handle      DrawingBitmap;   // Off-screen bitmap used for double-buffered drawing of main window
+static handle      DrawingContext;  // Drawing context for double-buffered drawing of switcher window
+static handle      DrawingBitmap;   // Off-screen bitmap used for double-buffered drawing of switcher
 static RECT        DrawingRect;     // Size of the off-screen bitmap
 static f32         DrawingScale;    // DPI scale of the monitor where the cursor is, which is where the switcher will be displayed
 static i32         MouseX, MouseY;  // Mouse position, for highlighting and clicking app icons in switcher
@@ -654,11 +656,11 @@ static void InitConfig(void)
 		.wrapbump                = true,
 		// Appearance
 		.darkmode                = false,
-		.switcherHeight          = 128,
 		.switcherHorzMargin      =  24,
 		.switcherVertMargin      =  32,
-		.iconWidth               =  64,
+		.iconSize                =  64,
 		.iconHorzPadding         =   8,
+		.fontSize                =  16,
 		// Blacklist
 		.blacklist = {
 			{ null,                       L"ApplicationFrameWindow" },
@@ -780,6 +782,9 @@ static int RunCmdTab(handle instance, u16 *args)
 	Print(L"cmdtab quit\n");
 	bool hasLeaks = _CrtDumpMemoryLeaks();
 	Print(L"leaks? %s\n", hasLeaks ? L"YES" : L"No leaks.");
+	if (hasLeaks) {
+		Error(null, L"There were memory leaks.");
+	}
 	return hasLeaks;
 }
 
@@ -1105,13 +1110,15 @@ static void ResizeSwitcher(void)
 	GetCursorPos(&mousePos);
 	GetMonitorInfoW(MonitorFromPoint(mousePos, MONITOR_DEFAULTTONEAREST), &mi);
 
-	u32     iconsWidth = DrawingScale * AppsCount * Config.iconWidth;
-	u32   paddingWidth = DrawingScale * AppsCount * Config.iconHorzPadding * 2;
-	u32    marginWidth = DrawingScale *         2 * Config.switcherHorzMargin;
-	u32 switcherHeight = DrawingScale * Config.switcherHeight;
+	u32     iconsWidth = DrawingScale * (AppsCount * Config.iconSize);
+	u32   paddingWidth = DrawingScale * (AppsCount * Config.iconHorzPadding * 2);
+	u32    marginWidth = DrawingScale *         (2 * Config.switcherHorzMargin);
+	u32       iconRows = 1;
+	u32    iconsHeight = DrawingScale *  (iconRows * Config.iconSize);
+	u32   marginHeight = DrawingScale *         (2 * Config.switcherVertMargin);
 
 	u32 w = iconsWidth + paddingWidth + marginWidth;
-	u32 h = switcherHeight;
+	u32 h = iconsHeight + marginHeight;
 	i32 x = mi.rcMonitor.left + (mi.rcMonitor.right - mi.rcMonitor.left - w) / 2;
 	i32 y = mi.rcMonitor.top + (mi.rcMonitor.bottom - mi.rcMonitor.top - h) / 2;
 
@@ -1136,12 +1143,12 @@ static void RedrawSwitcher(void)
 {
 	// TODO Use 'Config.style'
 
-	COLORREF BACKGROUND   = RGB(32, 32, 32); // dark mode?
-	COLORREF TEXT_COLOR   = RGB(235, 235, 235);
+	COLORREF WIN_COLOR_BG = RGB(32, 32, 32); // dark mode?
+	COLORREF TXT_COLOR    = RGB(235, 235, 235);
 	COLORREF SEL_COLOR    = RGB(76, 194, 255); // Sampled from Windows 11 Alt-Tab
 	COLORREF SEL_COLOR_BG = RGB(11, 11, 11); // Sampled from Windows 11 Alt-Tab
 
-	u32 ICON_WIDTH = DrawingScale * Config.iconWidth;
+	u32 ICON_WIDTH = DrawingScale * Config.iconSize;
 	u32 ICON_PAD   = DrawingScale * Config.iconHorzPadding;
 	u32 HORZ_PAD   = DrawingScale * Config.switcherHorzMargin;
 	u32 VERT_PAD   = DrawingScale * Config.switcherVertMargin;
@@ -1153,17 +1160,21 @@ static void RedrawSwitcher(void)
 
 	static HBRUSH windowBackground = {0};
 	static HBRUSH selectionBackground = {0};
+	static HBRUSH selectionColor = {0};
 	static HPEN selectionOutline = {0};
 
 	// Init background brushes (static vars)
 	if (windowBackground == null) {
-		windowBackground = CreateSolidBrush(BACKGROUND);
+		windowBackground = CreateSolidBrush(WIN_COLOR_BG);
 	}
 	if (selectionBackground == null) {
 		selectionBackground = CreateSolidBrush(SEL_COLOR_BG);
 	}
+	if (selectionColor == null) {
+		selectionColor = CreateSolidBrush(GetAccentColor() & 0x00FFFFFF); // SEL_COLOR
+	}
 	if (selectionOutline == null) {
-		selectionOutline = CreatePen(PS_SOLID, SEL_OUTLINE, (GetAccentColor() & 0x00FFFFFF)); //HIGHLIGHT);
+		selectionOutline = CreatePen(PS_SOLID, SEL_OUTLINE, GetAccentColor() & 0x00FFFFFF); // SEL_COLOR
 	}
 
 	// Window rect
@@ -1180,7 +1191,7 @@ static void RedrawSwitcher(void)
 
 	// Select text font, color & background for DrawTextW (used to draw title text)
 	HFONT oldFont = (HFONT)SelectObject(DrawingContext, GetStockObject(DEFAULT_GUI_FONT));
-	SetTextColor(DrawingContext, TEXT_COLOR);
+	SetTextColor(DrawingContext, TXT_COLOR);
 	SetBkMode(DrawingContext, TRANSPARENT);
 
 	// This is how GDI handles memory?
@@ -1211,8 +1222,17 @@ static void RedrawSwitcher(void)
 			RoundRect(DrawingContext, left - SEL_VERT_OFF, top - SEL_HORZ_OFF, right + SEL_VERT_OFF, bottom + SEL_HORZ_OFF, SEL_RADIUS, SEL_RADIUS);
 			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, selectionBackground, DI_NORMAL);
 
+			// Add window count to app name
+			string title = {0};
+			if (app->windowsCount > 1) {
+				title.length = swprintf(title.text, countof(title.text), L"%ls (%u)", app->name.text, app->windowsCount);
+			} else {
+				title.length = swprintf(title.text, countof(title.text), L"%ls", app->name.text);
+			}
+			title.ok = (title.length > 0);
+
 			// Draw app name
-			u16 *titleText = app->name.text;
+			u16 *titleText = title.text;
 			RECT titleRect = {0}; // DrawTextW uses a destination rect for drawing
 
 			// Measure text width
@@ -1226,7 +1246,7 @@ static void RedrawSwitcher(void)
 			i32 widthDiff = titleWidth - (titleRect.right - titleRect.left);
 			if (widthDiff > 0) {
 				// titleRect is too small for text, grow the rect
-				titleRect.left -= (i32)ceil(widthDiff / 2.0);
+				titleRect.left  -= (i32)ceil(widthDiff / 2.0);
 				titleRect.right += (i32)floor(widthDiff / 2.0);
 			}
 
@@ -1253,7 +1273,7 @@ static struct app *GetAppForPosition(i32 x, i32 y)
 	// Iteration logic copy/pasted from RedrawSwitcher, so if something changes
 	// there update this:
 
-	u32 ICON_WIDTH = DrawingScale * Config.iconWidth;
+	u32 ICON_WIDTH = DrawingScale * Config.iconSize;
 	u32 ICON_PAD   = DrawingScale * Config.iconHorzPadding;
 	u32 HORZ_PAD   = DrawingScale * Config.switcherHorzMargin;
 	u32 VERT_PAD   = DrawingScale * Config.switcherVertMargin;
@@ -1277,7 +1297,7 @@ static struct app *GetAppForPosition(i32 x, i32 y)
 		// Ignore padding for mouse selection, for uSaBiLiTy
 		left -= ICON_PAD;
 		top = 0;
-		height = Config.switcherHeight; // TODO BUG scale?
+		height = DrawingRect.bottom - DrawingRect.top; // aka. switcherHeight
 		right += ICON_PAD;
 		bottom = top + height;
 
@@ -1415,7 +1435,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			}
 			SelectFirstApp(); // Initialize selection
 			if (*SelectedWindow == GetCoreWindow(GetForegroundWindow())) { // Don't select next when on blank desktop
-				SelectNextApp(shiftHeld, !Config.wrapbump || !keyRepeat);
+				SelectNextApp(shiftHeld, !keyRepeat || !Config.wrapbump);
 			}
 			if (Config.fastSwitchingForApps) {
 				ShowSelectedWindow();
@@ -1439,7 +1459,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				goto passMessage;
 			}
 			SelectFirstApp(); // Initialize selection
-			SelectNextWindow(shiftHeld, !Config.wrapbump || !keyRepeat);
+			SelectNextWindow(shiftHeld, !keyRepeat || !Config.wrapbump);
 			if (Config.fastSwitchingForWindows) {
 				ShowSelectedWindow();
 			}
@@ -1451,20 +1471,22 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 
 	} else { // (SelectedWindow != null) means switcher is active/visible
 
-		// ========================================
-		// Deactivation
-		// ========================================
-
 		bool mod1Up = keyCode == Config.hotkeyForApps.mod && !keyDown;
 		bool mod2Up = keyCode == Config.hotkeyForWindows.mod && !keyDown;
 
 		if (mod1Up || mod2Up) {
+
+			// ========================================
+			// Deactivation
+			// ========================================
+
 			// After much experimentation it seems to work best to consume
 			// these mod keyups and manually inject mod keyups. I dunno why.
 			SendModKeysUp();
 			ShowSelectedWindow();
 			HideSwitcher();
 			goto consumeMessage;
+
 		} else {
 
 			bool keyRepeat = SetKey(keyCode, keyDown); // Manually track key repeat
@@ -1482,7 +1504,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			// Subsequent Alt-Tab - next app (hold Shift for previous)
 			// Also arrow keys, left and right
 			if (key1Down || (nextDown || prevDown)) {
-				SelectNextApp(shiftHeld || prevDown, !Config.wrapbump || !keyRepeat);
+				SelectNextApp(shiftHeld || prevDown, !keyRepeat || !Config.wrapbump);
 				if (Config.fastSwitchingForApps) {
 					ShowSelectedWindow();
 				}
@@ -1495,7 +1517,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			// Subsequent Alt-Tilde/Backquote - next window (hold Shift for previous)
 			// TODO Also arrow keys, up and down
 			if (key2Down) {
-				SelectNextWindow(shiftHeld, !Config.wrapbump || !keyRepeat);
+				SelectNextWindow(shiftHeld, !keyRepeat || !Config.wrapbump);
 				if (Config.fastSwitchingForWindows) {
 					ShowSelectedWindow();
 				}
@@ -1628,7 +1650,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 static i64 OnSwitcherCreate(void)
 {
 	// Make the codepath hot to prevent kbd hook from timing out on first use
-	UpdateApps();
+	UpdateSwitcher();
 	return 1;
 }
 
