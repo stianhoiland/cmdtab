@@ -1509,8 +1509,8 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			// Deactivation
 			// ========================================
 
-			bool escDown = keyCode == VK_ESCAPE && keyDown;
-			bool enterDown = keyCode == VK_RETURN && keyDown;
+			bool escDown = keyCode == VK_ESCAPE && !keyDown;
+			bool enterDown = keyCode == VK_RETURN && !keyDown;
 
 			// Alt-Enter - switch to selected window
 			if (enterDown) {
@@ -1534,7 +1534,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			bool deleteDown = keyCode == VK_DELETE && keyDown;
 			bool keyMDown   = keyCode == 'M' && keyDown;
 			bool keyHDown   = keyCode == 'H' && keyDown;
-			bool keyBDown   = keyCode == 'B' && keyDown;
+			bool keyBDown   = keyCode == 'B' && !keyDown;
 
 			// Alt-F4 - quit cmdtab
 			if (keyF4Down) {
