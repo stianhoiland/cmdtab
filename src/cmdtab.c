@@ -137,7 +137,6 @@ static i64 FinishMeasuring(i64 start)
 
 static void Print(u16 *fmt, ...)
 {
-	#ifdef _DEBUG
 	u16 buffer[2048];
 	va_list args;
 	va_start(args, fmt);
@@ -147,12 +146,12 @@ static void Print(u16 *fmt, ...)
 	  OutputDebugStringW(buffer);
 	#else
 	  fputws(buffer, stdout);
-	#endif
 	#endif
 }
 
 static void Log(u16 *fmt, ...)
 {
+	#ifndef _DEBUG
 	u16 buffer[2048];
 	va_list args;
 	va_start(args, fmt);
@@ -162,6 +161,7 @@ static void Log(u16 *fmt, ...)
 	  OutputDebugStringW(buffer);
 	#else
 	  fputws(buffer, stdout);
+	#endif
 	#endif
 }
 
@@ -262,7 +262,7 @@ static string GetExePath(handle hwnd)
 	GetWindowThreadProcessId(hwnd, &pid);
 	handle process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
 	if (!process || process == INVALID_HANDLE_VALUE) {
-		Print(L"WARNING couldn't open process with pid: %u\n", pid);
+		Log(L"WARNING couldn't open process with pid: %u\n", pid);
 		return path;
 	}
 	ULONG length = countof(path.text);
@@ -271,7 +271,7 @@ static string GetExePath(handle hwnd)
 	if (path.ok) {
 		path.length = length;
 	} else {
-		Print(L"WARNING couldn't get exe path for process with pid: %u\n", pid);
+		Log(L"WARNING couldn't get exe path for process with pid: %u\n", pid);
 	}
 	return path;
 }
@@ -284,7 +284,7 @@ static string GetWindowTitle(handle hwnd)
 	return title;
 }
 
-static void PrintWindowX(handle hwnd) // PrintWindow already taken
+static void LogWindow(handle hwnd)
 {
 	if (hwnd) {
 		#ifdef _DEBUG
@@ -310,15 +310,15 @@ static void PrintWindowX(handle hwnd) // PrintWindow already taken
 		u16 *exComposited       = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_COMPOSITED) ? L", composited" : L"";
 		u16 *exPaletteWindow    = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_PALETTEWINDOW) ? L", palettewindow" : L"";
 		u16 *exOverlappedWindow = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_OVERLAPPEDWINDOW) ? L", exoverlappedwindow" : L"";
-		Print(L"%p { %s, %s }%s\"%.32s\"", hwnd, filename.text, class.text, wsShowState, title.text);
-		Print(L" (%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s)\n",
+		Log(L"%p { %s, %s }%s\"%.32s\"", hwnd, filename.text, class.text, wsShowState, title.text);
+		Log(L" (%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s)\n",
 			wsChild, wsVisible, exAppWindow, exNoActivate, exToolWindow, exTopMost,
 			wsDisabled, wsPopup, wsOverlapped, wsDlgFrame, exDlgModalFrame, exLayered, exComposited, exPaletteWindow, exOverlappedWindow);
 		#else
-		Print(L"%p\n", hwnd);
+		Log(L"%p\n", hwnd);
 		#endif
 	} else {
-		Print(L"null hwnd\n");
+		Log(L"null hwnd\n");
 	}
 }
 
@@ -419,7 +419,7 @@ static handle GetAppIcon(string *filepath)
 	}
 	SHFILEINFOW info = {0};
 	if (!SHGetFileInfoW(filepath->text, 0, &info, sizeof info, SHGFI_SYSICONINDEX)) { // 2nd arg: -1, 0 or FILE_ATTRIBUTE_NORMAL
-		Log(L"suspicious SHGetFileInfoW return"); // SHGetFileInfoW has special return with SHGFI_SYSICONINDEX flag, which I think should never fail (docs unclear?)
+		Print(L"suspicious SHGetFileInfoW return"); // SHGetFileInfoW has special return with SHGFI_SYSICONINDEX flag, which I think should never fail (docs unclear?)
 		__debugbreak();
 		return null;
 	}
@@ -512,16 +512,16 @@ static void ShowWindowX(handle hwnd) // ShowWindow already taken
 			ShowWindow(hwnd, SW_SHOWNA);
 		}
 		if (SetForegroundWindow(GetLastActivePopup(GetAppHost(hwnd)))) {
-			Print(L"switch to ");
-			PrintWindowX(hwnd);
+			Log(L"switch to ");
+			LogWindow(hwnd);
 		} else {
-			Print(L"ERROR couldn't switch to:");
-			PrintWindowX(hwnd);
+			Log(L"ERROR couldn't switch to:");
+			LogWindow(hwnd);
 		    PlaySound(L"SystemHand", null, SND_ASYNC);
 			//HideSwitcher(); // need forward decl
 		}
 	} else {
-		Print(L"switch to: already foreground\n");
+		Log(L"switch to: already foreground\n");
 	}
 }
 
@@ -533,15 +533,15 @@ static void HideWindow(handle hwnd)
 
 static void MinimizeWindow(handle hwnd)
 {
-	Print(L"minimize window ");
-	PrintWindowX(hwnd);
+	Log(L"minimize window ");
+	LogWindow(hwnd);
 	PostMessageW(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
 }
 
 static void CloseWindowX(handle hwnd) // CloseWindow already taken
 {
-	Print(L"close window ");
-	PrintWindowX(hwnd);
+	Log(L"close window ");
+	LogWindow(hwnd);
 	PostMessageW(hwnd, WM_CLOSE, 0, 0);
 }
 
@@ -551,7 +551,7 @@ static void TerminateWindowProcess(handle hwnd)
 	GetWindowThreadProcessId(hwnd, &pid);
 	handle process = OpenProcess(PROCESS_TERMINATE, false, pid); // NOTE See GetProcessHandleFromHwnd
 	if (!process || process == INVALID_HANDLE_VALUE || !TerminateProcess(process, 0)) {
-		Print(L"ERROR couldn't terminate process with pid: %u\n", pid);
+		Log(L"ERROR couldn't terminate process with pid: %u\n", pid);
 	}
 	if (process) CloseHandle(process);
 }
@@ -678,7 +678,7 @@ static void InitConfig(void)
 
 	Config.darkmode = IsDarkModeEnabled();
 
-	Print(L"darkmode %s\n", Config.darkmode ? L"YES" : L"NO");
+	Log(L"darkmode %s\n", Config.darkmode ? L"YES" : L"NO");
 }
 
 static bool HasDebugLaunchArgument(u16 *args)
@@ -747,7 +747,7 @@ static int RunCmdTab(handle instance, u16 *args)
 		AttachDebugConsole(L"cmdtab Debug Output");
 	}
 
-	Log(L"ARGS: %s\n", args);
+	Print(L"ARGS: %s\n", args);
 
 	if (!HasAutorunLaunchArgument(args)) {
 		AskAutorun();
@@ -779,9 +779,9 @@ static int RunCmdTab(handle instance, u16 *args)
 
 	if (Mutex) ReleaseMutex(Mutex);
 
-	Print(L"cmdtab quit\n");
+	Log(L"cmdtab quit\n");
 	bool hasLeaks = _CrtDumpMemoryLeaks();
-	Print(L"leaks? %s\n", hasLeaks ? L"YES" : L"No leaks.");
+	Log(L"leaks? %s\n", hasLeaks ? L"YES" : L"No leaks.");
 	if (hasLeaks) {
 		Error(null, L"There were memory leaks.");
 	}
@@ -806,20 +806,20 @@ static void PrintApps(void)
 {
 	int windowsCount = 0;
 	for (int i = 0; i < AppsCount; i++) {
-		Print(L"%i ", i);
+		Log(L"%i ", i);
 		struct app *app = &Apps[i];
-		PrintWindowX(app->windows[0]);
+		LogWindow(app->windows[0]);
 		windowsCount += app->windowsCount;
 		for (int j = 1; j < app->windowsCount; j++) {
-			Print(L"  %i ", j);
-			PrintWindowX(app->windows[j]);
+			Log(L"  %i ", j);
+			LogWindow(app->windows[j]);
 		}
 	}
-	Print(L"%i apps %i windows, %i history:\n", AppsCount, windowsCount, HistoryCount);
+	Log(L"%i apps %i windows, %i history:\n", AppsCount, windowsCount, HistoryCount);
 	// And print History
 	for (int i = 0; i < HistoryCount; i++) {
-		Print(L"%i ", i);
-		PrintWindowX(History[i]);
+		Log(L"%i ", i);
+		LogWindow(History[i]);
 	}
 }
 
@@ -856,9 +856,9 @@ static void AddToHistory(handle hwnd) {
 	hwnd = GetCoreWindow(hwnd);
 	// Already added and first?
 	if (History[0] == hwnd) {
-		Print(L"(already first in history) ");
-		Print(L"activate window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
-		PrintWindowX(hwnd);
+		Log(L"(already first in history) ");
+		Log(L"activate window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
+		LogWindow(hwnd);
 		return;
 	}
 	// Find 'hwnd' in previous history, shift other hwnds down to position of 'hwnd', and put 'hwnd' first
@@ -874,9 +874,9 @@ static void AddToHistory(handle hwnd) {
 
 	// Basic checks for eligibility in Alt-Tab
 	if (!IsAltTabWindow(hwnd)) {
-		Print(L"(ignored) ");
-		Print(L"activate window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
-		PrintWindowX(hwnd);
+		Log(L"(ignored) ");
+		Log(L"activate window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
+		LogWindow(hwnd);
 		return;
 	}
 	// Get module filepath, abort if failed (most likely access denied)
@@ -888,9 +888,9 @@ static void AddToHistory(handle hwnd) {
 	string filename = StringFileName(&filepath, false);
 	string class = GetWindowClass(hwnd);
 	if (WindowIsBlacklisted(&filename, &class)) {
-		Print(L"(blacklisted) ");
-		Print(L"activate window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
-		PrintWindowX(hwnd);
+		Log(L"(blacklisted) ");
+		Log(L"activate window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
+		LogWindow(hwnd);
 		return;
 	}
 
@@ -902,8 +902,8 @@ static void AddToHistory(handle hwnd) {
 	}
 	memmove(&History[1], &History[0], sizeof History[0] * HistoryCount);
 	History[0] = hwnd;
-	Print(L"activate window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
-	PrintWindowX(hwnd);
+	Log(L"activate window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
+	LogWindow(hwnd);
 }
 
 static void AddToApps(handle hwnd)
@@ -913,9 +913,9 @@ static void AddToApps(handle hwnd)
 	// 2. Basic checks for eligibility in Alt-Tab
 	if (!IsAltTabWindow(hwnd)) {
 		// These prints are very spammy since looots of windows are ignored
-		//Print(L"(ignored) ");
-		//Print(L"add window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
-		//PrintWindowX(hwnd);
+		//Log(L"(ignored) ");
+		//Log(L"add window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
+		//LogWindow(hwnd);
 		return;
 	}
 	// 3. Get module filepath, abort if failed (most likely access denied)
@@ -927,9 +927,9 @@ static void AddToApps(handle hwnd)
 	string filename = StringFileName(&filepath, false);
 	string class = GetWindowClass(hwnd);
 	if (WindowIsBlacklisted(&filename, &class)) {
-		Print(L"(blacklisted) ");
-		Print(L"add window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
-		PrintWindowX(hwnd);
+		Log(L"(blacklisted) ");
+		Log(L"add window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
+		LogWindow(hwnd);
 		return;
 	}
 	// 5. Find existing app with same module filepath
@@ -979,8 +979,8 @@ static void AddToApps(handle hwnd)
 	// 7. Add window to app's window list (even if only 1 per entry in case of !Config.groupByApp)
 	app->windows[app->windowsCount++] = hwnd;
 	//
-	Print(L"add window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
-	PrintWindowX(hwnd);
+	Log(L"add window %s", GetAppHost(hwnd) != hwnd ? L"(uwp) " : L"");
+	LogWindow(hwnd);
 }
 
 static void ActivateWindow(handle hwnd)
@@ -1041,7 +1041,7 @@ static void UpdateApps(void)
 	for (int i = HistoryCount-1; i >= 0; i--) {
 		ActivateWindow(History[i]);
 	}
-	Log(L"UpdateApps (%i windows) %llims elapsed\n", windowsCount, FinishMeasuring(start));
+	Print(L"UpdateApps (%i windows) %llims elapsed\n", windowsCount, FinishMeasuring(start));
 	PrintApps();
 }
 
@@ -1056,12 +1056,12 @@ static void SelectFirstApp(void)
 	} else {
 		SelectedApp = null;
 		SelectedWindow = null;
-		Print(L"nothing to select\n");
+		Log(L"nothing to select\n");
 	}
 	/*dbg*/
 	if (oldWindow != SelectedWindow) {
-		Print(L"select first ");
-		PrintWindowX(*SelectedWindow);
+		Log(L"select first ");
+		LogWindow(*SelectedWindow);
 	}
 }
 
@@ -1087,8 +1087,8 @@ static void SelectNextApp(bool reverse, bool wrap)
 	SelectedWindow = &SelectedApp->windows[0];
 	/*dbg*/
 	if (oldWindow != SelectedWindow) {
-		Print(L"select app ");
-		PrintWindowX(*SelectedWindow);
+		Log(L"select app ");
+		LogWindow(*SelectedWindow);
 	}
 }
 
@@ -1157,8 +1157,8 @@ static void SelectNextWindow(bool reverse, bool wrap)
 	}
 	/*dbg*/
 	if (oldWindow != SelectedWindow) {
-		Print(L"select window ");
-		PrintWindowX(*SelectedWindow);
+		Log(L"select window ");
+		LogWindow(*SelectedWindow);
 	}
 }
 
@@ -1377,7 +1377,7 @@ static void ShowSwitcher(void)
 	///*dbg*/i64 start = StartMeasuring();
 	ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 	RedrawSwitcher();
-	///*dbg*/Log(L"RedrawSwitcher %llims elapsed\n", FinishMeasuring(start));
+	///*dbg*/Print(L"RedrawSwitcher %llims elapsed\n", FinishMeasuring(start));
 	ReceiveLastInputEvent();
 	ShowWindowX(Switcher);
 	LockSetForegroundWindow(LSFW_LOCK);
@@ -1389,7 +1389,7 @@ static void UpdateSwitcher(void)
 	///*dbg*/i64 start = StartMeasuring();
 	ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 	RedrawSwitcher();
-	///*dbg*/Log(L"RedrawSwitcher %llims elapsed\n", FinishMeasuring(start));
+	///*dbg*/Print(L"RedrawSwitcher %llims elapsed\n", FinishMeasuring(start));
 }
 
 static void SendModKeysUp(void)
@@ -1407,14 +1407,14 @@ static void ShowSelectedWindow(void)
 	///*dbg*/i64 start = StartMeasuring();
 	ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 	RedrawSwitcher();
-	///*dbg*/Log(L"RedrawSwitcher %llims elapsed\n", FinishMeasuring(start));
+	///*dbg*/Print(L"RedrawSwitcher %llims elapsed\n", FinishMeasuring(start));
 	ReceiveLastInputEvent();
 	ShowWindowX(*SelectedWindow);
 }
 
 static void HideSwitcher(void)
 {
-	Print(L"cancel/close\n");
+	Log(L"cancel/close\n");
 	HideWindow(Switcher);
 	LockSetForegroundWindow(LSFW_UNLOCK);
 	// Reset selection
@@ -1433,7 +1433,7 @@ static void HideSwitcher(void)
 //		app = &Apps[i];
 //		for (int j = 0; j < app->windowsCount; j++) {
 //			if (app->windows[j] == hwnd) {
-//				Print(L"quit app %s\n", app->name);
+//				Log(L"quit app %s\n", app->name);
 //				for (int k = 0; k < app->windowsCount; k++) {
 //					CloseWindowX(app->windows[k]);
 //				}
@@ -1474,7 +1474,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 	// injected mod keyups.
 	bool injected = (kbd->flags & LLKHF_INJECTED);
 	if (injected && !keyDown && (keyCode == Config.hotkeyForApps.mod || keyCode == Config.hotkeyForWindows.mod)) {
-		Print(L"skip INJECTED INPUT %u %s\n", keyCode, keyDown ? L"down" : L"up");
+		Log(L"skip INJECTED INPUT %u %s\n", keyCode, keyDown ? L"down" : L"up");
 		goto passMessage;
 	}
 
@@ -1497,7 +1497,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 		if (hotkeyForApps) {
 			UpdateApps();
 			if (AppsCount <= 0) {
-				Print(L"no apps\n");
+				Log(L"no apps\n");
 				goto passMessage;
 			}
 			SelectFirstApp(); // Initialize selection
@@ -1522,7 +1522,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 		if (hotkeyForWindows) {
 			UpdateApps();
 			if (AppsCount <= 0) {
-				Print(L"no apps\n");
+				Log(L"no apps\n");
 				goto passMessage;
 			}
 			SelectFirstApp(); // Initialize selection
@@ -1673,7 +1673,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			bool keyF12Down = keyCode == VK_F12 && keyDown && !keyRepeat;
 
 			if (keyF12Down) {
-				Log(L"debug hotkey");
+				Print(L"debug hotkey");
 				__debugbreak();
 			}
 			if (keyF11Down) {
@@ -1689,7 +1689,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				keyCode == VK_MENU    || keyCode == VK_LMENU    || keyCode == VK_RMENU    ||
 				keyCode == VK_SHIFT   || keyCode == VK_LSHIFT   || keyCode == VK_RSHIFT   ||
 				keyCode == VK_CAPITAL) {
-				Print(L"modifier passthrough\n");
+				Log(L"modifier passthrough\n");
 				goto passMessage;
 			}
 			// Other passthrough
@@ -1698,19 +1698,19 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			}
 			// Input sink - consume keystrokes when activated
 			if (true) {
-				Print(L"input sink %u %s\n", keyCode, keyDown ? L"down" : L"up");
+				Log(L"input sink %u %s\n", keyCode, keyDown ? L"down" : L"up");
 				goto consumeMessage;
 			}
 		}
 	}
 
 	passMessage:
-		//Print(L"passMessage\n");
+		//Log(L"passMessage\n");
 		return CallNextHookEx(null, code, wparam, lparam);
 	consumeMessage:
 		// By returning a non-zero value from the hook procedure, the message
 		// is consumed and does not get passed to the target window
-		//Print(L"consumeMessage\n");
+		//Log(L"consumeMessage\n");
 		return 1;
 }
 
@@ -1723,7 +1723,7 @@ static i64 OnSwitcherCreate(void)
 
 static i64 OnSwitcherDPIChanged(u16 newDPI, RECT newRect)
 {
-	Print(L"WM_DPICHANGED, current scale: %f, new scale: %f\n", DrawingScale, newDPI / 96.0);
+	Log(L"WM_DPICHANGED, current scale: %f, new scale: %f\n", DrawingScale, newDPI / 96.0);
 	return 1;
 }
 
@@ -1748,10 +1748,10 @@ static i64 OnSwitcherFocusChange(bool focused)
 {
 	// TODO Cancel on mouse clicking outside window
 	if (focused) {
-		Print(L"switcher got focus\n");
+		Log(L"switcher got focus\n");
 		return 0;
 	} else {
-		Print(L"switcher lost focus\n");
+		Log(L"switcher lost focus\n");
 		MouseX = 0;
 		MouseY = 0;
 		return 1; // Nu-uh!
@@ -1769,7 +1769,7 @@ static i64 OnSwitcherMouseMove(i32 x, i32 y)
 	bool skip = (!MouseX && !MouseY) || (MouseX == x && MouseY == y);
 	MouseX = x;
 	MouseY = y;
-	//Print(L"x%i y%i\n", MouseX, MouseY);
+	//Log(L"x%i y%i\n", MouseX, MouseY);
 	if (skip) {
 		return 0;
 	}
@@ -1779,8 +1779,8 @@ static i64 OnSwitcherMouseMove(i32 x, i32 y)
 	if (SelectedApp != mouseoverApp && mouseoverApp) {
 		SelectedApp = mouseoverApp;
 		SelectedWindow = &SelectedApp->windows[0];
-		/*dbg*/Print(L"select app ");
-		/*dbg*/PrintWindowX(*SelectedWindow);
+		/*dbg*/Log(L"select app ");
+		/*dbg*/LogWindow(*SelectedWindow);
 		RedrawSwitcher();
 	}
 
@@ -1850,11 +1850,11 @@ static VOID CALLBACK EventHookProcedure(HWINEVENTHOOK hook, ULONG event, HWND hw
 {
 	switch (event) {
 		case EVENT_SYSTEM_FOREGROUND:
-			Print(L"FOREGROUND WINDOW EVENT\n");
+			Log(L"FOREGROUND WINDOW EVENT\n");
 			OnShellWindowActivated(hwnd);
 			break;
 		case EVENT_OBJECT_UNCLOAKED:
-			Print(L"UNCLOAKED WINDOW EVENT\n");
+			Log(L"UNCLOAKED WINDOW EVENT\n");
 			OnShellWindowActivated(hwnd);
 			break;
 	}
