@@ -1187,6 +1187,10 @@ static void ResizeSwitcher(void)
 
 	MoveWindow(Switcher, x, y, w, h, false); // Yes, "MoveWindow" means "ResizeWindow"
 
+	// Prevent accidental mouse selection
+	MouseX = 0;
+	MouseY = 0;
+
 	// Resize off-screen double-buffering bitmap
 	RECT resized = {x, y, x+w, y+h};
 	if (!EqualRect(&DrawingRect, &resized)) {
@@ -1375,21 +1379,11 @@ static struct app *GetAppForPosition(i32 x, i32 y)
 static void ShowSwitcher(void)
 {
 	///*dbg*/i64 start = StartMeasuring();
-	ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 	RedrawSwitcher();
 	///*dbg*/Print(L"RedrawSwitcher %llims elapsed\n", FinishMeasuring(start));
 	ReceiveLastInputEvent();
 	ShowWindowX(Switcher);
 	LockSetForegroundWindow(LSFW_LOCK);
-}
-
-static void UpdateSwitcher(void)
-{
-	UpdateApps();
-	///*dbg*/i64 start = StartMeasuring();
-	ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
-	RedrawSwitcher();
-	///*dbg*/Print(L"RedrawSwitcher %llims elapsed\n", FinishMeasuring(start));
 }
 
 static void SendModKeysUp(void)
@@ -1405,7 +1399,6 @@ static void SendModKeysUp(void)
 static void ShowSelectedWindow(void)
 {
 	///*dbg*/i64 start = StartMeasuring();
-	ResizeSwitcher(); // NOTE Must call ResizeSwitcher after UpdateApps, before RedrawSwitcher & before ShowSwitcher
 	RedrawSwitcher();
 	///*dbg*/Print(L"RedrawSwitcher %llims elapsed\n", FinishMeasuring(start));
 	ReceiveLastInputEvent();
@@ -1508,6 +1501,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				ShowSelectedWindow();
 			}
 			if (Config.showSwitcherForApps) {
+				ResizeSwitcher(); // Since we have called UpdateApp() above
 				ShowSwitcher();
 			}
 			goto consumeMessage;
@@ -1531,6 +1525,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				ShowSelectedWindow();
 			}
 			if (Config.showSwitcherForWindows) {
+				ResizeSwitcher(); // Since we have called UpdateApp() above
 				ShowSwitcher();
 			}
 			goto consumeMessage;
@@ -1624,6 +1619,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			bool keyMDown   = keyCode == 'M' && keyDown;
 			bool keyHDown   = keyCode == 'H' && keyDown;
 			bool keyBDown   = keyCode == 'B' && !keyDown;
+			bool keyGDown   = keyCode == 'G' && keyDown;
 
 			// Alt-F4 - quit cmdtab
 			if (keyF4Down) {
@@ -1634,17 +1630,22 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			if (keyQDown) {
 				//CloseWindows(*SelectedWindow);
 				TerminateWindowProcess(*SelectedWindow);
+				UpdateApps();
+				ResizeSwitcher(); // Since we called UpdateApps above
 				if (SelectedApp == &Apps[AppsCount-1] && AppsCount > 1) {
 					SelectedApp--;
 					SelectedWindow = &SelectedApp->windows[0];
 				}
-				UpdateSwitcher();
+				RedrawSwitcher();
 				goto consumeMessage;
 			}
 			// Alt-W or Alt-Delete - close selected window
 			if (keyWDown || deleteDown) {
 				CloseWindowX(*SelectedWindow);
-				UpdateSwitcher();
+				UpdateApps();
+				// TODO fix selection
+				ResizeSwitcher(); // Since we called UpdateApps above
+				RedrawSwitcher();
 				goto consumeMessage;
 			}
 			// Alt-M - minimize selected window
@@ -1662,6 +1663,31 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				handle selectedWindow = *SelectedWindow; // HideSwitcher resets SelectedWindow
 				HideSwitcher();
 				ReportWindowHandle(Switcher, selectedWindow);
+				goto consumeMessage;
+			}
+			if (keyGDown) {
+				// TODO Refactor
+				handle selectedWindow = *SelectedWindow;
+				Config.groupByApp = !Config.groupByApp;
+				UpdateApps();
+				ResizeSwitcher(); // Since we have called UpdateApps() above
+				// Find existing app and window
+				struct app *app = null;
+				handle *window = null;
+				for (int i = 0; i < AppsCount; i++) {
+					app = &Apps[i];
+					for (int j = 0; j < app->windowsCount; j++) {
+						if (app->windows[j] == selectedWindow) {
+							window = &app->windows[j];
+							break;
+						}
+					}
+					if (window) break;
+				}
+				SelectedApp = app;
+				SelectedWindow = window;
+				//
+				RedrawSwitcher();
 				goto consumeMessage;
 			}
 
@@ -1717,7 +1743,9 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 static i64 OnSwitcherCreate(void)
 {
 	// Make the codepath hot to prevent kbd hook from timing out on first use
-	UpdateSwitcher();
+	UpdateApps();
+	ResizeSwitcher();
+	RedrawSwitcher();
 	return 1;
 }
 
@@ -1752,8 +1780,6 @@ static i64 OnSwitcherFocusChange(bool focused)
 		return 0;
 	} else {
 		Log(L"switcher lost focus\n");
-		MouseX = 0;
-		MouseY = 0;
 		return 1; // Nu-uh!
 	}
 }
@@ -1763,9 +1789,12 @@ static i64 OnSwitcherMouseMove(i32 x, i32 y)
 	// The switcher window is sent a mouse move event if the mouse happens to be
 	// over the window on window show. So this is to prevent accidental mouse
 	// selection.
-	// This depends on setting MouseX&Y to 0 at init (already happens because
-	// static) and when the switcher becomes inactive, which is currently
-	// done in OnSwitcherFocusChange, but could be done in CloseSwitcher
+	// This depends on setting MouseX & Y to 0 at init (already happens because
+	// static) and when the switcher dimensions change, which is currently
+	// done in ResizeSwitcher. Previously this was done in OnSwitcherFocusChange
+	// or CloseSwitcher, but this meant that resizing the switcher window (which
+	// neither loses focus nor closes the switcher, yet changes its dimensions)
+	// still caused the same accidental mouse selection
 	bool skip = (!MouseX && !MouseY) || (MouseX == x && MouseY == y);
 	MouseX = x;
 	MouseY = y;
