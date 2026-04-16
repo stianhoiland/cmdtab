@@ -473,6 +473,25 @@ static void SetAutorun(bool enabled, u16 *keyname, u16 *args)
 	(void)success;
 }
 
+static int GetRegKey(u16 *keyname) {
+	ULONG value;
+	ULONG size = sizeof value;
+	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\stianhoiland\\cmdtab\\", keyname, RRF_RT_DWORD, null, &value, &size)) {
+		return value;
+	} else {
+		return -1;
+	}
+}
+
+static void SetRegKey(u16 *keyname, int value) {
+	HKEY regkey;
+	i32 success; // BUG Not checking 'success' below
+	success = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\stianhoiland\\cmdtab\\", 0, null, 0, KEY_SET_VALUE, null, &regkey, null);
+	success = RegSetValueExW(regkey, keyname, 0, REG_DWORD, (VOID *)&value, 4);
+	success = RegCloseKey(regkey);
+	(void)success;
+}
+
 static bool IsKeyDown(u32 key)
 {
 	return (bool)(GetAsyncKeyState(key) & 0x8000);
@@ -677,6 +696,8 @@ static void InitConfig(void)
 	Config.hotkeyForWindows.key = MapVirtualKeyW(Config.hotkeyForWindows.key, MAPVK_VSC_TO_VK_EX);
 
 	Config.darkmode = IsDarkModeEnabled();
+
+	Config.groupByApp = GetRegKey(L"groupByApp");
 
 	Log(L"darkmode %s\n", Config.darkmode ? L"YES" : L"NO");
 }
@@ -1669,6 +1690,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				// TODO Refactor
 				handle selectedWindow = *SelectedWindow;
 				Config.groupByApp = !Config.groupByApp;
+				SetRegKey(L"groupByApp", Config.groupByApp);
 				UpdateApps();
 				ResizeSwitcher(); // Since we have called UpdateApps() above
 				// Find existing app and window
