@@ -65,6 +65,7 @@
 #define true 1
 #define null NULL // WHY IS EVERYONE SCREAMING
 
+typedef unsigned char        u8;
 typedef wchar_t             u16; // "Microsoft implements wchar_t as a two-byte unsigned value."
 typedef unsigned int        u32;
 typedef unsigned long long  u64;
@@ -638,7 +639,7 @@ static handle      HistoryHooks[2]; // Hook handles for WinEvent window activati
 static handle      History[128];    // Window handles from window activation events (MRU). Deduplicated, so prior activations are moved to the front
 static iz          HistoryCount;    // Number of elements in 'History' array
 static handle      KeyboardHook;    // Handle for low-level keyboard hook
-static u16         Keyboard[16];    // 256 bits to track key repeat for low-level keyboard hook
+static u8          Keyboard[32];    // 256 bits to track key repeat for low-level keyboard hook
 static struct app  Apps[128];       // Apps to be displayed in switcher
 static iz          AppsCount;       // Number of elements in 'Apps' array
 static struct app *SelectedApp;     // Pointer to one of the elements in 'Apps' array. The app for the 'SelectedWindow'
