@@ -260,7 +260,7 @@ static string GetExePath(handle hwnd)
 	string path = {0};
 	ULONG pid;
 	GetWindowThreadProcessId(hwnd, &pid);
-	handle process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
+	handle process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
 	if (!process || process == INVALID_HANDLE_VALUE) {
 		Log(L"WARNING couldn't open process with pid: %u\n", pid);
 		return path;
