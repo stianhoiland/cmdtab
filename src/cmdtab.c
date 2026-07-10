@@ -420,7 +420,10 @@ static handle GetAppIcon(string *filepath)
 	SHFILEINFOW info = {0};
 	if (!SHGetFileInfoW(filepath->text, 0, &info, sizeof info, SHGFI_SYSICONINDEX)) { // 2nd arg: -1, 0 or FILE_ATTRIBUTE_NORMAL
 		Print(L"suspicious SHGetFileInfoW return"); // SHGetFileInfoW has special return with SHGFI_SYSICONINDEX flag, which I think should never fail (docs unclear?)
+		#ifdef _DEBUG
 		__debugbreak();
+		#endif
+		IImageList_Release(list);
 		return null;
 	}
 	HICON icon = {0};
@@ -1716,7 +1719,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			// ========================================
 			// Debug
 			// ========================================
-
+            #ifdef _DEBUG
 			bool keyF11Down = keyCode == VK_F11 && keyDown && !keyRepeat;
 			bool keyF12Down = keyCode == VK_F12 && keyDown && !keyRepeat;
 
@@ -1727,6 +1730,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			if (keyF11Down) {
 				PrintApps();
 			}
+			#endif
 
 			// ========================================
 			// Hook management
