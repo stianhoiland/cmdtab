@@ -7,6 +7,12 @@ set(BUILD_TYPE "MinSizeRel")
 
 add_executable(cmdtab WIN32 "src/cmdtab.c" "res/cmdtab.rc")
 
+# cmdtab.rc already embeds res/cmdtab.manifest (resource type 24, id 1);
+# keep the linker from embedding a second, conflicting default manifest
+if(MSVC)
+	target_link_options(cmdtab PRIVATE /MANIFEST:NO)
+endif()
+
 #set_property(TARGET ${PROJECT_NAME} PROPERTY
     #LINK_FLAGS /MANIFESTUAC:"level='highestAvailable' uiAccess='true'"
 #)
