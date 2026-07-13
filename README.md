@@ -62,6 +62,28 @@ You can further customize the scheduled task created by that command by running 
 ### Uninstalling
 **cmdtab** leaves no trace on your system, except for a registry key if you choose "Yes" when  **cmdtab** prompts you about autorun (and the scheduled task mentioned above if you manually created it). You can remove the autorun registry key by running **cmdtab** one last time before you delete `cmdtab.exe` and choose "No" to autorun.
 
+## Verifying releases
+
+Releases are compiled from source by [GitHub Actions](.github/workflows/build.yml) on GitHub-hosted runners — not on a maintainer's machine — and every release artifact carries a signed [build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds) (SLSA). You can cryptographically verify that a downloaded binary was built by this repository's workflow from a specific public commit.
+
+#### Verify provenance
+Requires the [GitHub CLI](https://cli.github.com) (`gh`):
+```console
+gh attestation verify cmdtab.exe --repo stianhoiland/cmdtab
+```
+This checks the artifact's signature against GitHub's attestation store and prints the source commit and workflow that produced it. It also works on the release zip itself.
+
+#### Verify checksums
+Each release includes a `SHA256SUMS` file generated during the CI build:
+```console
+sha256sum -c SHA256SUMS
+```
+Or on Windows:
+```powershell
+Get-FileHash cmdtab.exe -Algorithm SHA256
+```
+Compare the output against the corresponding line in `SHA256SUMS`.
+
 ## Buildling from source
 
 #### MSVC/CMake
