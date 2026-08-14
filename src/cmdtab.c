@@ -152,7 +152,7 @@ static void Print(u16 *fmt, ...)
 
 static void Log(u16 *fmt, ...)
 {
-	#ifndef _DEBUG
+	#ifdef _DEBUG
 	u16 buffer[2048];
 	va_list args;
 	va_start(args, fmt);
