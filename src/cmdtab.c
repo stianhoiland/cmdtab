@@ -702,7 +702,10 @@ static struct gui  DrawingDims;     // Scaled dimensions of GUI elements. Update
 static HBRUSH      DrawingBg;       // Window background
 static HBRUSH      SelectionBg;     // Selection background
 static HPEN        SelectionOutline;// Selection rectangle pen
+static HPEN        MouseOutline;    // Mouseover rectangle pen
+static HPEN        NoneOutline;     // Pen with window background color
 static i32         MouseX, MouseY;  // Mouse position, for highlighting and clicking app icons in switcher
+static bool        MouseDown;       // Is left mouse button down?
 static struct app *MouseApp;        // Pointer to one of the elements in 'Apps' array. The app under MouseX,MouseY
 
 
@@ -1309,20 +1312,46 @@ static void DrawApp(struct app *app, RECT appRect, RECT windowRect)
 	i32  width = ICON_WIDTH;
 	i32 height = ICON_WIDTH;
 
-	if (app != SelectedApp) {
-		// Draw only icon, with window background
-		DrawIconEx(DrawingContext, appRect.left, appRect.top, app->icon, width, height, 0, DrawingBg, DI_NORMAL);
-	} else {
-		// Select pen & brush for RoundRect (used to draw selection rectangle & background)
-		HBRUSH oldBrush = (HBRUSH)SelectObject(DrawingContext, SelectionBg);
-		HPEN oldPen = (HPEN)SelectObject(DrawingContext, SelectionOutline);
+	bool hasMouseover = MouseApp != null;
+	bool hasMousedown = hasMouseover && MouseDown;
+	bool isSelected = SelectedApp == app && app;
+	bool isMouseover = MouseApp == app && app;
+	bool isMousedown = hasMousedown && isMouseover;
 
-		// Draw selection rectangle and icon, with selection background
+	// Select background brush for RoundRect (used to draw selection rectangle background)
+	HBRUSH backgroundBrush;
+	if ((isSelected && !hasMouseover) || isMouseover) {
+		backgroundBrush = SelectionBg;
+	} else {
+		backgroundBrush = DrawingBg;
+	}
+	HBRUSH oldBrush = (HBRUSH)SelectObject(DrawingContext, backgroundBrush);
+
+	// Select foreground pen for RoundRect (used to draw selection rectangle)
+	HPEN foregroundPen;
+	if ((isSelected && !hasMousedown) || isMousedown) {
+		foregroundPen = SelectionOutline;
+	} else if (isMouseover) {
+		foregroundPen = MouseOutline;
+	} else {
+		foregroundPen = NoneOutline;
+	}
+	HPEN oldPen = (HPEN)SelectObject(DrawingContext, foregroundPen);
+
+	if (isSelected) {
+		// Draw selection rectangle and icon, with selection background and rectangle
 		RoundRect(DrawingContext, appRect.left - SEL_VERT_OFF, appRect.top - SEL_HORZ_OFF, appRect.right + SEL_VERT_OFF, appRect.bottom + SEL_HORZ_OFF, SEL_RADIUS, SEL_RADIUS);
-		DrawIconEx(DrawingContext, appRect.left, appRect.top, app->icon, width, height, 0, SelectionBg, DI_NORMAL);
+		DrawIconEx(DrawingContext, appRect.left, appRect.top, app->icon, width, height, 0, backgroundBrush, DI_NORMAL);
+	} else if (isMouseover) {
+		// Draw selection rectangle and icon, with selection background and mouseover rectangle
+		RoundRect(DrawingContext, appRect.left - SEL_VERT_OFF, appRect.top - SEL_HORZ_OFF, appRect.right + SEL_VERT_OFF, appRect.bottom + SEL_HORZ_OFF, SEL_RADIUS, SEL_RADIUS);
+		DrawIconEx(DrawingContext, appRect.left, appRect.top, app->icon, width, height, 0, backgroundBrush, DI_NORMAL);
+	} else {
+		// Draw icon with window background
+		DrawIconEx(DrawingContext, appRect.left, appRect.top, app->icon, width, height, 0, backgroundBrush, DI_NORMAL);
 	}
 
-	if ((app == SelectedApp && !MouseApp) || app == MouseApp) {
+	if ((isSelected && !hasMouseover) || isMouseover) {
 		// Add window count to app name
 		string title = {0};
 		if (app->windowsCount > 1) {
@@ -1378,6 +1407,7 @@ static void RedrawSwitcher(void)
 	COLORREF TXT_COLOR    = RGB(235, 235, 235);
 	COLORREF SEL_COLOR    = GetAccentColor() & 0x00FFFFFF; // RGB(76, 194, 255); // Sampled from Windows 11 Alt-Tab
 	COLORREF SEL_COLOR_BG = RGB(11, 11, 11); // Sampled from Windows 11 Alt-Tab
+	COLORREF MOUSE_COLOR  = RGB(40, 40, 40); // Sampled from Windows 11 Alt-Tab
 
 	u32 ICON_WIDTH = DrawingDims.iconSize;
 	u32 ICON_PAD   = DrawingDims.iconHorzMargin;
@@ -1390,6 +1420,8 @@ static void RedrawSwitcher(void)
 	if (!DrawingBg) DrawingBg = CreateSolidBrush(WIN_COLOR_BG);
 	if (!SelectionBg) SelectionBg = CreateSolidBrush(SEL_COLOR_BG);
 	if (!SelectionOutline) SelectionOutline = CreatePen(PS_SOLID, SEL_OUTLINE, SEL_COLOR);
+	if (!MouseOutline) MouseOutline = CreatePen(PS_SOLID, SEL_OUTLINE, MOUSE_COLOR);
+	if (!NoneOutline) NoneOutline = CreatePen(PS_SOLID, SEL_OUTLINE, WIN_COLOR_BG);
 
 	// Select text color & background for DrawTextW (used to draw title text)
 	SetTextColor(DrawingContext, TXT_COLOR);
@@ -1410,6 +1442,9 @@ static void RedrawSwitcher(void)
 	//DeleteObject(oldBrush);
 	//DeleteObject(oldFont);
 
+	RECT selectedRect = {0};
+	RECT mousedownRect = {0};
+
 	for (int i = 0; i < AppsCount; i++) {
 		struct app *app = &Apps[i];
 
@@ -1428,7 +1463,24 @@ static void RedrawSwitcher(void)
 		appRect.right  = appRect.left + width;
 		appRect.bottom = appRect.top + height;
 
+		if (SelectedApp == app) {
+			selectedRect = appRect;
+		}
+		if (MouseApp == app && MouseDown) {
+			mousedownRect = appRect;
+		}
+		if (SelectedApp == app || (MouseApp == app && MouseDown)) {
+			continue; // Draw these later
+		}
+
 		DrawApp(app, appRect, windowRect);
+	}
+
+	if (SelectedApp) {
+		DrawApp(SelectedApp, selectedRect, windowRect);
+	}
+	if (MouseApp && MouseDown) {
+		DrawApp(MouseApp, mousedownRect, windowRect);
 	}
 
 	// Invalidate window rectangle
@@ -1925,8 +1977,21 @@ static i64 OnSwitcherMouseMove(i32 x, i32 y)
 	return 1;
 }
 
+static i64 OnSwitcherMouseDown(void)
+{
+	MouseDown = true;
+	RedrawSwitcher();
+	if (MouseApp) {
+		SetCursor(LoadCursorW(null, IDC_HAND));
+	} else {
+		SetCursor(LoadCursorW(null, IDC_ARROW));
+	}
+	return 1;
+}
+
 static i64 OnSwitcherMouseUp(void)
 {
+	MouseDown = false;
 	if (MouseApp) {
 		SelectedApp = MouseApp;
 		SelectedWindow = &SelectedApp->windows[0];
@@ -1970,8 +2035,16 @@ static LRESULT CALLBACK SwitcherWindowProcedure(HWND hwnd, UINT message, WPARAM 
 			return OnSwitcherMouseMove(LOWORD(lparam), HIWORD(lparam));
 		case WM_MOUSELEAVE:
 			return OnSwitcherMouseMove(0, 0);
+		case WM_LBUTTONDOWN:
+			SetCapture(hwnd);
+			return OnSwitcherMouseDown();
 		case WM_LBUTTONUP:
+			// The order should reversed, but can't be bothered to store ret value and break every case
+			ReleaseCapture();
 			return OnSwitcherMouseUp();
+		case WM_CAPTURECHANGED:
+			if ((HWND)lparam != hwnd) {}
+			return 1;
 		case WM_CLOSE:
 			return OnSwitcherClose();
 		default:
