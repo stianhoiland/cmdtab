@@ -652,7 +652,7 @@ struct ini { // cmdtab settings
 	u32 switcherHorzMargin;
 	u32 switcherVertMargin;
 	u32 iconSize;
-	u32 iconHorzPadding;
+	u32 iconHorzMargin;
 	u32 fontSize;
 	// Blacklist
 	struct identifier {
@@ -667,6 +667,19 @@ struct app {
 	handle icon;                // Big app icon
 	handle windows[64];         // App windows that can be switched to
 	iz windowsCount;            // Number of elements in 'windows' array
+};
+
+struct gui {
+	f32 drawScale; // DPI scale of the monitor where the cursor is, which is where the switcher will be displayed
+	RECT drawRect; // Size of the scaled off-screen bitmap
+	u32 switcherHorzMargin;
+	u32 switcherVertMargin;
+	u32 iconSize;
+	u32 iconHorzMargin;
+	u32 selOutline;
+	u32 selRadius;
+	u32 selHorzOff;
+	u32 selVertOff;
 };
 
 static handle      Mutex;           // Singleton mutex to prevent running more than one cmdtab instance
@@ -684,8 +697,10 @@ static handle     *SelectedWindow;  // Currently selected window in switcher. No
 static handle      Switcher;        // Handle for main window (aka. switcher)
 static handle      DrawingContext;  // Drawing context for double-buffered drawing of switcher window
 static handle      DrawingBitmap;   // Off-screen bitmap used for double-buffered drawing of switcher
-static RECT        DrawingRect;     // Size of the off-screen bitmap
-static f32         DrawingScale;    // DPI scale of the monitor where the cursor is, which is where the switcher will be displayed
+static struct gui  DrawingDims;     // Scaled dimensions of GUI elements. Updated on resize
+static HBRUSH      DrawingBg;       // Window background
+static HBRUSH      SelectionBg;     // Selection background
+static HPEN        SelectionOutline;// Selection rectangle pen
 static i32         MouseX, MouseY;  // Mouse position, for highlighting and clicking app icons in switcher
 
 //================
@@ -715,7 +730,7 @@ static void InitConfig(void)
 		.switcherHorzMargin      =  24,
 		.switcherVertMargin      =  32,
 		.iconSize                =  64,
-		.iconHorzPadding         =   8,
+		.iconHorzMargin          =   8,
 		.fontSize                =  16,
 		// Blacklist
 		.blacklist = {
@@ -1223,7 +1238,12 @@ static void SelectNextWindow(bool reverse, bool wrap)
 static void ResizeSwitcher(void)
 {
 	// Get DPI of monitor where the mouse pointer is
-	DrawingScale = GetDpiForMouseMonitor() / 96.0;
+	f32 scale = GetDpiForMouseMonitor() / 96.0;
+
+	u32 iconSize           = scale * Config.iconSize;
+	u32 iconHorzMargin     = scale * Config.iconHorzMargin;
+	u32 switcherHorzMargin = scale * Config.switcherHorzMargin;
+	u32 switcherVertMargin = scale * Config.switcherVertMargin;
 
 	// Use the monitor where the mouse pointer is currently placed (#5)
 	POINT mousePos = {0};
@@ -1231,12 +1251,12 @@ static void ResizeSwitcher(void)
 	GetCursorPos(&mousePos);
 	GetMonitorInfoW(MonitorFromPoint(mousePos, MONITOR_DEFAULTTONEAREST), &mi);
 
-	u32     iconsWidth = DrawingScale * (AppsCount * Config.iconSize);
-	u32   paddingWidth = DrawingScale * (AppsCount * Config.iconHorzPadding * 2);
-	u32    marginWidth = DrawingScale *         (2 * Config.switcherHorzMargin);
-	u32       iconRows = 1;
-	u32    iconsHeight = DrawingScale *  (iconRows * Config.iconSize);
-	u32   marginHeight = DrawingScale *         (2 * Config.switcherVertMargin);
+	u32   iconsWidth = AppsCount * iconSize;
+	u32 paddingWidth = AppsCount * iconHorzMargin * 2;
+	u32  marginWidth =         2 * switcherHorzMargin;
+	u32     iconRows = 1;
+	u32  iconsHeight =  iconRows * iconSize;
+	u32 marginHeight =         2 * switcherVertMargin;
 
 	u32 w = iconsWidth + paddingWidth + marginWidth;
 	u32 h = iconsHeight + marginHeight;
@@ -1251,16 +1271,98 @@ static void ResizeSwitcher(void)
 
 	// Resize off-screen double-buffering bitmap
 	RECT resized = {x, y, x+w, y+h};
-	if (!EqualRect(&DrawingRect, &resized)) {
+	if (!EqualRect(&DrawingDims.drawRect, &resized)) {
+		DrawingDims.drawRect           = resized;
+		DrawingDims.drawScale          = scale;
+		DrawingDims.iconSize           = iconSize;
+		DrawingDims.iconHorzMargin     = iconHorzMargin;
+		DrawingDims.switcherHorzMargin = switcherHorzMargin;
+		DrawingDims.switcherVertMargin = switcherVertMargin;
+		DrawingDims.selOutline         = scale *  3.5;
+		DrawingDims.selRadius          = scale * 10;
+		DrawingDims.selHorzOff         = scale *  6; // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
+		DrawingDims.selVertOff         = scale * 10; // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
+
 		handle context = GetDC(Switcher);
 		DeleteObject(DrawingBitmap);
 		DeleteDC(DrawingContext);
-		DrawingRect = resized;
 		DrawingContext = CreateCompatibleDC(context);
-		DrawingBitmap = CreateCompatibleBitmap(context, DrawingRect.right - DrawingRect.left, DrawingRect.bottom - DrawingRect.top);
+		DrawingBitmap = CreateCompatibleBitmap(context, DrawingDims.drawRect.right - DrawingDims.drawRect.left, DrawingDims.drawRect.bottom - DrawingDims.drawRect.top);
 		handle oldBitmap = (handle)SelectObject(DrawingContext, DrawingBitmap);
 		DeleteObject(oldBitmap);
 		ReleaseDC(Switcher, context);
+	}
+}
+
+static void DrawApp(struct app *app, RECT appRect, RECT windowRect)
+{
+	u32 ICON_WIDTH = DrawingDims.iconSize;
+	u32 ICON_PAD   = DrawingDims.iconHorzMargin;
+
+	u32 SEL_OUTLINE  = DrawingDims.selOutline;
+	u32 SEL_RADIUS   = DrawingDims.selRadius;
+	u32 SEL_HORZ_OFF = DrawingDims.selHorzOff;
+	u32 SEL_VERT_OFF = DrawingDims.selVertOff;
+
+	i32  width = ICON_WIDTH;
+	i32 height = ICON_WIDTH;
+
+	if (app != SelectedApp) {
+		// Draw only icon, with window background
+		DrawIconEx(DrawingContext, appRect.left, appRect.top, app->icon, width, height, 0, DrawingBg, DI_NORMAL);
+	} else {
+		// Select pen & brush for RoundRect (used to draw selection rectangle & background)
+		HBRUSH oldBrush = (HBRUSH)SelectObject(DrawingContext, SelectionBg);
+		HPEN oldPen = (HPEN)SelectObject(DrawingContext, SelectionOutline);
+
+		// Draw selection rectangle and icon, with selection background
+		RoundRect(DrawingContext, appRect.left - SEL_VERT_OFF, appRect.top - SEL_HORZ_OFF, appRect.right + SEL_VERT_OFF, appRect.bottom + SEL_HORZ_OFF, SEL_RADIUS, SEL_RADIUS);
+		DrawIconEx(DrawingContext, appRect.left, appRect.top, app->icon, width, height, 0, SelectionBg, DI_NORMAL);
+
+		// Add window count to app name
+		string title = {0};
+		if (app->windowsCount > 1) {
+			title.length = swprintf(title.text, countof(title.text), L"%ls (%u)", app->title.text, app->windowsCount);
+		} else {
+			title.length = swprintf(title.text, countof(title.text), L"%ls", app->title.text);
+		}
+		if (title.length <= 0) {
+			title.length = -1;
+		}
+
+		// Draw app name
+		u16 *titleText = title.text;
+		RECT titleRect = {0}; // DrawTextW uses a destination rect for drawing
+
+		// Measure text width
+		DrawTextW(DrawingContext, titleText, -1, &titleRect, DT_CALCRECT | DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
+		i32 titleWidth = (titleRect.right - titleRect.left) + 2; // Hmm, measured size seems a teensy bit too small, so +2
+
+		titleRect.left = appRect.left;
+		titleRect.right = appRect.right;
+		titleRect.bottom = windowRect.bottom;
+
+		i32 widthDiff = titleWidth - (titleRect.right - titleRect.left);
+		if (widthDiff > 0) {
+			// titleRect is too small for text, grow the rect
+			titleRect.left  -= (i32)ceil(widthDiff / 2.0);
+			titleRect.right += (i32)floor(widthDiff / 2.0);
+		}
+
+		titleRect.bottom -= ICON_PAD; // *** this lifts the app text up a little ***
+
+		// If the app name, when centered, extends past window bounds, adjust label position to be inside window bounds
+		if (titleRect.right > windowRect.right) {
+			titleRect.left -= (titleRect.right - windowRect.right) + ICON_PAD;
+			titleRect.right = windowRect.right - ICON_PAD;
+		}
+		if (titleRect.left < 0) {
+			titleRect.right += ICON_PAD + abs(titleRect.left);
+			titleRect.left   = ICON_PAD + 0;
+		}
+
+		///* dbg */ FillRect(DrawingContext, &titleRect, CreateSolidBrush(RGB(255, 0, 0))); // Check the size of the text box
+		DrawTextW(DrawingContext, titleText, -1, &titleRect, DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
 	}
 }
 
@@ -1270,36 +1372,25 @@ static void RedrawSwitcher(void)
 
 	COLORREF WIN_COLOR_BG = RGB(32, 32, 32); // dark mode?
 	COLORREF TXT_COLOR    = RGB(235, 235, 235);
-	COLORREF SEL_COLOR    = RGB(76, 194, 255); // Sampled from Windows 11 Alt-Tab
+	COLORREF SEL_COLOR    = GetAccentColor() & 0x00FFFFFF; // RGB(76, 194, 255); // Sampled from Windows 11 Alt-Tab
 	COLORREF SEL_COLOR_BG = RGB(11, 11, 11); // Sampled from Windows 11 Alt-Tab
 
-	u32 ICON_WIDTH = DrawingScale * Config.iconSize;
-	u32 ICON_PAD   = DrawingScale * Config.iconHorzPadding;
-	u32 HORZ_PAD   = DrawingScale * Config.switcherHorzMargin;
-	u32 VERT_PAD   = DrawingScale * Config.switcherVertMargin;
+	u32 ICON_WIDTH = DrawingDims.iconSize;
+	u32 ICON_PAD   = DrawingDims.iconHorzMargin;
+	u32 HORZ_PAD   = DrawingDims.switcherHorzMargin;
+	u32 VERT_PAD   = DrawingDims.switcherVertMargin;
 
-	u32 SEL_OUTLINE  = DrawingScale *  3.5;
-	u32 SEL_RADIUS   = DrawingScale * 10;
-	u32 SEL_VERT_OFF = DrawingScale * 10; // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
-	u32 SEL_HORZ_OFF = DrawingScale *  6; // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
-
-	static HBRUSH windowBackground = {0};
-	static HBRUSH selectionBackground = {0};
-	static HBRUSH selectionColor = {0};
-	static HPEN selectionOutline = {0};
+	u32 SEL_OUTLINE = DrawingDims.selOutline;
 
 	// Init background brushes (static vars)
-	if (windowBackground == null) {
-		windowBackground = CreateSolidBrush(WIN_COLOR_BG);
+	if (DrawingBg == null) {
+		DrawingBg = CreateSolidBrush(WIN_COLOR_BG);
 	}
-	if (selectionBackground == null) {
-		selectionBackground = CreateSolidBrush(SEL_COLOR_BG);
+	if (SelectionBg == null) {
+		SelectionBg = CreateSolidBrush(SEL_COLOR_BG);
 	}
-	if (selectionColor == null) {
-		selectionColor = CreateSolidBrush(GetAccentColor() & 0x00FFFFFF); // SEL_COLOR
-	}
-	if (selectionOutline == null) {
-		selectionOutline = CreatePen(PS_SOLID, SEL_OUTLINE, GetAccentColor() & 0x00FFFFFF); // SEL_COLOR
+	if (SelectionOutline == null) {
+		SelectionOutline = CreatePen(PS_SOLID, SEL_OUTLINE, SEL_COLOR);
 	}
 
 	// Window rect
@@ -1308,11 +1399,7 @@ static void RedrawSwitcher(void)
 
 	// Invalidate & draw window background
 	RedrawWindow(Switcher, null, null, RDW_INVALIDATE | RDW_ERASE);
-	FillRect(DrawingContext, &windowRect, windowBackground);
-
-	// Select pen & brush for RoundRect (used to draw selection rectangle)
-	HPEN oldPen = (HPEN)SelectObject(DrawingContext, selectionOutline);
-	HBRUSH oldBrush = (HBRUSH)SelectObject(DrawingContext, selectionBackground);
+	FillRect(DrawingContext, &windowRect, DrawingBg);
 
 	// Select text font, color & background for DrawTextW (used to draw title text)
 	HFONT oldFont = (HFONT)SelectObject(DrawingContext, GetStockObject(DEFAULT_GUI_FONT));
@@ -1332,66 +1419,17 @@ static void RedrawSwitcher(void)
 		i32 right0 = i != 0 ? ICON_PAD : 0;
 
 		i32  icons = (ICON_PAD + ICON_WIDTH + ICON_PAD) * i;
-		i32   left = HORZ_PAD + left0 + icons + right0;
-		i32    top = VERT_PAD;
 		i32  width = ICON_WIDTH;
 		i32 height = ICON_WIDTH;
-		i32  right = left + width;
-		i32 bottom = top + height;
 
-		if (app != SelectedApp) {
-			// Draw only icon, with window background
-			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, windowBackground, DI_NORMAL);
-		} else {
-			// Draw selection rectangle and icon, with selection background
-			RoundRect(DrawingContext, left - SEL_VERT_OFF, top - SEL_HORZ_OFF, right + SEL_VERT_OFF, bottom + SEL_HORZ_OFF, SEL_RADIUS, SEL_RADIUS);
-			DrawIconEx(DrawingContext, left, top, app->icon, width, height, 0, selectionBackground, DI_NORMAL);
+		RECT appRect = {0};
 
-			// Add window count to app name
-			string title = {0};
-			if (app->windowsCount > 1) {
-				title.length = swprintf(title.text, countof(title.text), L"%ls (%u)", app->title.text, app->windowsCount);
-			} else {
-				title.length = swprintf(title.text, countof(title.text), L"%ls", app->title.text);
-			}
-			if (title.length <= 0) {
-				title.length = -1;
-			}
+		appRect.left   = HORZ_PAD + left0 + icons + right0;
+		appRect.top    = VERT_PAD;
+		appRect.right  = appRect.left + width;
+		appRect.bottom = appRect.top + height;
 
-			// Draw app name
-			u16 *titleText = title.text;
-			RECT titleRect = {0}; // DrawTextW uses a destination rect for drawing
-
-			// Measure text width
-			DrawTextW(DrawingContext, titleText, -1, &titleRect, DT_CALCRECT | DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
-			i32 titleWidth = (titleRect.right - titleRect.left) + 2; // Hmm, measured size seems a teensy bit too small, so +2
-
-			titleRect.left = left;
-			titleRect.right = right;
-			titleRect.bottom = windowRect.bottom;
-
-			i32 widthDiff = titleWidth - (titleRect.right - titleRect.left);
-			if (widthDiff > 0) {
-				// titleRect is too small for text, grow the rect
-				titleRect.left  -= (i32)ceil(widthDiff / 2.0);
-				titleRect.right += (i32)floor(widthDiff / 2.0);
-			}
-
-			titleRect.bottom -= ICON_PAD; // *** this lifts the app text up a little ***
-
-			// If the app name, when centered, extends past window bounds, adjust label position to be inside window bounds
-			if (titleRect.right > windowRect.right) {
-				titleRect.left -= (titleRect.right - windowRect.right) + ICON_PAD;
-				titleRect.right = windowRect.right - ICON_PAD;
-			}
-			if (titleRect.left < 0) {
-				titleRect.right += ICON_PAD + abs(titleRect.left);
-				titleRect.left   = ICON_PAD + 0;
-			}
-
-			///* dbg */ FillRect(DrawingContext, &titleRect, CreateSolidBrush(RGB(255, 0, 0))); // Check the size of the text box
-			DrawTextW(DrawingContext, titleText, -1, &titleRect, DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
-		}
+		DrawApp(app, appRect, windowRect);
 	}
 }
 
@@ -1400,10 +1438,10 @@ static struct app *GetAppForPosition(i32 x, i32 y)
 	// Iteration logic copy/pasted from RedrawSwitcher, so if something changes
 	// there update this:
 
-	u32 ICON_WIDTH = DrawingScale * Config.iconSize;
-	u32 ICON_PAD   = DrawingScale * Config.iconHorzPadding;
-	u32 HORZ_PAD   = DrawingScale * Config.switcherHorzMargin;
-	u32 VERT_PAD   = DrawingScale * Config.switcherVertMargin;
+	u32 ICON_WIDTH = DrawingDims.iconSize;
+	u32 ICON_PAD   = DrawingDims.iconHorzMargin;
+	u32 HORZ_PAD   = DrawingDims.switcherHorzMargin;
+	u32 VERT_PAD   = DrawingDims.switcherVertMargin;
 
 	for (int i = 0; i < AppsCount; i++) {
 		struct app *app = &Apps[i];
@@ -1413,22 +1451,24 @@ static struct app *GetAppForPosition(i32 x, i32 y)
 		i32 right0 = i != 0 ? ICON_PAD : 0;
 
 		i32  icons = (ICON_PAD + ICON_WIDTH + ICON_PAD) * i;
-		i32   left = HORZ_PAD + left0 + icons + right0;
-		i32    top = VERT_PAD;
 		i32  width = ICON_WIDTH;
 		i32 height = ICON_WIDTH;
-		i32  right = left + width;
-		i32 bottom = top + height;
+
+		RECT appRect = {0};
+
+		appRect.left   = HORZ_PAD + left0 + icons + right0;
+		appRect.top    = VERT_PAD;
+		appRect.right  = appRect.left + width;
+		appRect.bottom = appRect.top + height;
 
 		// This is specific to GetAppForPosition
 		// Ignore padding for mouse selection, for uSaBiLiTy
-		left -= ICON_PAD;
-		top = 0;
-		height = DrawingRect.bottom - DrawingRect.top; // aka. switcherHeight
-		right += ICON_PAD;
-		bottom = top + height;
+		appRect.left  -= ICON_PAD;
+		appRect.right += ICON_PAD;
+		appRect.top    = 0;
+		appRect.bottom = appRect.top + (DrawingDims.drawRect.bottom - DrawingDims.drawRect.top); // aka. switcherHeight;
 
-		if (PtInRect(&(RECT){left, top, right, bottom}, (POINT){x, y})) {
+		if (PtInRect(&appRect, (POINT){x, y})) {
 			return app;
 		}
 	}
@@ -1813,7 +1853,7 @@ static i64 OnSwitcherCreate(void)
 
 static i64 OnSwitcherDPIChanged(u16 newDPI, RECT newRect)
 {
-	Log(L"WM_DPICHANGED, current scale: %f, new scale: %f\n", DrawingScale, newDPI / 96.0);
+	Log(L"WM_DPICHANGED, current scale: %f, new scale: %f\n", DrawingDims.drawScale, newDPI / 96.0);
 	return 1;
 }
 
@@ -1828,7 +1868,7 @@ static i64 OnSwitcherPaint(void)
 	if (BeginPaint(Switcher, &ps)) {
 		if (ps.fErase) {
 		}
-		BitBlt(ps.hdc, 0, 0, DrawingRect.right - DrawingRect.left, DrawingRect.bottom - DrawingRect.top, DrawingContext, 0, 0, SRCCOPY);
+		BitBlt(ps.hdc, 0, 0, DrawingDims.drawRect.right - DrawingDims.drawRect.left, DrawingDims.drawRect.bottom - DrawingDims.drawRect.top, DrawingContext, 0, 0, SRCCOPY);
 		EndPaint(Switcher, &ps);
 	}
 	return 1;
