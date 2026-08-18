@@ -573,7 +573,7 @@ static void ShowWindowX(handle hwnd) // ShowWindow already taken
 		} else {
 			Log(L"ERROR couldn't switch to:");
 			LogWindow(hwnd);
-		    PlaySound(L"SystemHand", null, SND_ASYNC);
+			PlaySound(L"SystemHand", null, SND_ASYNC);
 			//HideSwitcher(); // need forward decl
 		}
 	} else {
@@ -636,7 +636,8 @@ static void AttachDebugConsole(wchar_t *title)
 // cmdtab impl
 //==============================================================================
 
-struct ini { // cmdtab settings
+// Settings
+struct ini {
 	// Hotkeys
 	struct { u32 mod, key, enabled; } hotkeyForApps;
 	struct { u32 mod, key, enabled; } hotkeyForWindows;
@@ -729,11 +730,11 @@ static void InitConfig(void)
 		.wrapbump                = true,
 		// Appearance
 		.darkmode                = false,
-		.switcherHorzMargin      =  24,
-		.switcherVertMargin      =  32,
-		.iconSize                =  64,
-		.iconHorzMargin          =   8,
-		.fontSize                =  16,
+		.switcherHorzMargin      = 24,
+		.switcherVertMargin      = 32,
+		.iconSize                = 64,
+		.iconHorzMargin          =  8,
+		.fontSize                = 16,
 		// Blacklist
 		.blacklist = {
 			{ null,                       L"ApplicationFrameWindow" },
@@ -749,10 +750,9 @@ static void InitConfig(void)
 	Config.hotkeyForWindows.mod = MapVirtualKeyW(Config.hotkeyForWindows.mod, MAPVK_VSC_TO_VK_EX);
 	Config.hotkeyForWindows.key = MapVirtualKeyW(Config.hotkeyForWindows.key, MAPVK_VSC_TO_VK_EX);
 
-	Config.darkmode = IsDarkModeEnabled();
-
 	Config.groupByApp = GetRegKey(L"groupByApp");
 
+	Config.darkmode = IsDarkModeEnabled();
 	Log(L"darkmode %s\n", Config.darkmode ? L"YES" : L"NO");
 }
 
@@ -1271,7 +1271,7 @@ static void ResizeSwitcher(void)
 	MouseX = 0;
 	MouseY = 0;
 
-	// Resize off-screen double-buffering bitmap
+	// Resize off-screen double-buffering bitmap and save calculated dimensions
 	RECT resized = {x, y, x+w, y+h};
 	if (!EqualRect(&DrawingDims.drawRect, &resized)) {
 		DrawingDims.drawRect           = resized;
@@ -1286,9 +1286,9 @@ static void ResizeSwitcher(void)
 		DrawingDims.selVertOff         = scale * 10; // Selection rectangle offset (actual pixel offsets depends on SEL_RADIUS)
 
 		handle context = GetDC(Switcher);
-		DeleteObject(DrawingBitmap);
 		DeleteDC(DrawingContext);
 		DrawingContext = CreateCompatibleDC(context);
+		DeleteObject(DrawingBitmap);
 		DrawingBitmap = CreateCompatibleBitmap(context, DrawingDims.drawRect.right - DrawingDims.drawRect.left, DrawingDims.drawRect.bottom - DrawingDims.drawRect.top);
 		handle oldBitmap = (handle)SelectObject(DrawingContext, DrawingBitmap);
 		DeleteObject(oldBitmap);
@@ -1386,29 +1386,24 @@ static void RedrawSwitcher(void)
 
 	u32 SEL_OUTLINE = DrawingDims.selOutline;
 
-	// Init background brushes (static vars)
-	if (DrawingBg == null) {
-		DrawingBg = CreateSolidBrush(WIN_COLOR_BG);
-	}
-	if (SelectionBg == null) {
-		SelectionBg = CreateSolidBrush(SEL_COLOR_BG);
-	}
-	if (SelectionOutline == null) {
-		SelectionOutline = CreatePen(PS_SOLID, SEL_OUTLINE, SEL_COLOR);
-	}
+	// Init drawing brushes
+	if (!DrawingBg) DrawingBg = CreateSolidBrush(WIN_COLOR_BG);
+	if (!SelectionBg) SelectionBg = CreateSolidBrush(SEL_COLOR_BG);
+	if (!SelectionOutline) SelectionOutline = CreatePen(PS_SOLID, SEL_OUTLINE, SEL_COLOR);
+
+	// Select text color & background for DrawTextW (used to draw title text)
+	SetTextColor(DrawingContext, TXT_COLOR);
+	SetBkMode(DrawingContext, TRANSPARENT);
 
 	// Window rect
 	RECT windowRect = {0};
 	GetClientRect(Switcher, &windowRect);
 
-	// Invalidate & draw window background
-	RedrawWindow(Switcher, null, null, RDW_INVALIDATE | RDW_ERASE);
+	// Fill window background
 	FillRect(DrawingContext, &windowRect, DrawingBg);
 
-	// Select text font, color & background for DrawTextW (used to draw title text)
+	// Select text font for DrawTextW (used to draw title text)
 	HFONT oldFont = (HFONT)SelectObject(DrawingContext, GetStockObject(DEFAULT_GUI_FONT));
-	SetTextColor(DrawingContext, TXT_COLOR);
-	SetBkMode(DrawingContext, TRANSPARENT);
 
 	// This is how GDI handles memory?
 	//DeleteObject(oldPen);
@@ -1435,6 +1430,9 @@ static void RedrawSwitcher(void)
 
 		DrawApp(app, appRect, windowRect);
 	}
+
+	// Invalidate window rectangle
+	RedrawWindow(Switcher, null, null, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
 }
 
 static struct app *GetAppForPosition(i32 x, i32 y)
@@ -1493,7 +1491,7 @@ static void ShowSwitcher(void)
 static void SendModKeysUp(void)
 {
 	SendInput(2,
-		(INPUT[]) {
+		(INPUT[]){
 			(INPUT){.type = INPUT_KEYBOARD, .ki.wVk = Config.hotkeyForApps.mod, .ki.dwFlags = KEYEVENTF_KEYUP},
 			(INPUT){.type = INPUT_KEYBOARD, .ki.wVk = Config.hotkeyForWindows.mod, .ki.dwFlags = KEYEVENTF_KEYUP},
 		},
