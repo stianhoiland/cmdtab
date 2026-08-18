@@ -1884,12 +1884,6 @@ static i64 OnSwitcherMouseMove(i32 x, i32 y)
 	return 1;
 }
 
-static i64 OnSwitcherMouseLeave(void)
-{
-	OnSwitcherMouseMove(0, 0);
-	return 1;
-}
-
 static i64 OnSwitcherMouseUp(void)
 {
 	ShowSelectedWindow();
@@ -1927,7 +1921,7 @@ static LRESULT CALLBACK SwitcherWindowProcedure(HWND hwnd, UINT message, WPARAM 
 			TrackMouseEvent(&(TRACKMOUSEEVENT){.cbSize = sizeof(TRACKMOUSEEVENT), .dwFlags = TME_LEAVE, .hwndTrack = hwnd});
 			return OnSwitcherMouseMove(LOWORD(lparam), HIWORD(lparam));
 		case WM_MOUSELEAVE:
-			return OnSwitcherMouseLeave();
+			return OnSwitcherMouseMove(0, 0);
 		case WM_LBUTTONUP:
 			return OnSwitcherMouseUp();
 		case WM_CLOSE:
