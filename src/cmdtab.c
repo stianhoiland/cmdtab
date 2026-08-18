@@ -60,7 +60,7 @@
 //==============================================================================
 
 #define countof(a) (ptrdiff_t)(sizeof(a)/sizeof(*a))
-#define string(str) {str,countof(str)-1,true}
+#define string(str) {str,countof(str)-1}
 
 #define false 0
 #define true 1
@@ -70,24 +70,36 @@ typedef unsigned char        u8;
 typedef wchar_t             u16; // "Microsoft implements wchar_t as a two-byte unsigned value."
 typedef unsigned int        u32;
 typedef unsigned long long  u64;
+typedef signed short        i16;
 typedef signed int          i32;
 typedef signed long long    i64;
 typedef float               f32;
 typedef signed int         bool;
+typedef size_t               uz;
 typedef ptrdiff_t            iz;
 typedef void *           handle;
 typedef struct string    string;
 
 struct string {
 	u16 text[MAX_PATH];
-	iz length;
-	bool ok;
+	i16 length; // < 0 indicates error
 };
 
 static string UWPAppHostExe      = string(L"ApplicationFrameHost.exe");
 static string UWPAppHostClass    = string(L"ApplicationFrameWindow");
 static string UWPCoreWindowClass = string(L"Windows.UI.Core.CoreWindow");
 static string UWPAppsPath        = string(L"C:\\Program Files\\WindowsApps");
+
+static i16 StringLength(u16 *s1, i16 max)
+{
+	// Wrangle HRESULT and size_t -> i16 (i16 max = 0x7FFF, u16 max = 0xFFFF)
+	uz length;
+	if (SUCCEEDED(StringCchLengthW(s1, max, &length))) {
+		return length;
+	} else {
+		return -1;
+	}
+}
 
 static bool StringsAreEqual(string *s1, string *s2)
 {
@@ -114,11 +126,15 @@ static string StringFileName(string *filepath, bool extension)
 {
 	// aka. basename
 	string name = {0};
-	name.ok = SUCCEEDED(StringCchCopyNW(name.text, countof(name.text), PathFindFileNameW(filepath->text), countof(name.text)));
+	u16 *filename = PathFindFileNameW(filepath->text);
+	bool ok = SUCCEEDED(StringCchCopyNW(name.text, countof(name.text)-1, filename, filepath->length - (filename - filepath->text)));
 	if (!extension) {
-		name.ok = name.ok && SUCCEEDED(PathCchRemoveExtension(name.text, countof(name.text)));
+		ok = ok && SUCCEEDED(PathCchRemoveExtension(name.text, countof(name.text)));
 	}
-	name.ok = name.ok && SUCCEEDED(StringCchLengthW(name.text, countof(name.text), &name.length));
+	name.length = StringLength(name.text, countof(name.text));
+	if (name.length <= 0 || !ok) {
+		name.length = -1;
+	}
 	return name;
 }
 
@@ -197,8 +213,10 @@ static bool Ask(handle hwnd, u16 *fmt, ...)
 static string GetWindowClass(handle hwnd)
 {
 	string class = {0};
-	class.length = GetClassNameW(hwnd, class.text, countof(class.text));
-	class.ok = (class.length > 0);
+	class.length = (i16)GetClassNameW(hwnd, class.text, countof(class.text));
+	if (class.length <= 0) {
+		class.length = -1;
+	}
 	return class;
 }
 
@@ -268,12 +286,15 @@ static string GetExePath(handle hwnd)
 		return path;
 	}
 	ULONG length = countof(path.text);
-	path.ok = QueryFullProcessImageNameW(process, 0, path.text, &length);
+	BOOL ok = QueryFullProcessImageNameW(process, 0, path.text, &length);
 	CloseHandle(process);
-	if (path.ok) {
+	if (ok) {
 		path.length = length;
 	} else {
 		Log(L"WARNING couldn't get exe path for process with pid: %u\n", pid);
+	}
+	if (path.length <= 0) {
+		path.length = -1;
 	}
 	return path;
 }
@@ -282,7 +303,9 @@ static string GetWindowTitle(handle hwnd)
 {
 	string title = {0};
 	title.length = GetWindowTextW(hwnd, title.text, countof(title.text));
-	title.ok = (title.length > 0);
+	if (title.length <= 0) {
+		title.length = -1;
+	}
 	return title;
 }
 
@@ -291,7 +314,7 @@ static void LogWindow(handle hwnd)
 	if (hwnd) {
 		#ifdef _DEBUG
 		string filepath = GetExePath(hwnd);
-		if (!filepath.ok) return;
+		if (filepath.length <= 0) return;
 		string filename = StringFileName(&filepath, false);
 		string class = GetWindowClass(hwnd);
 		string title = GetWindowTitle(hwnd);
@@ -364,14 +387,14 @@ static string GetAppName(string *filepath)
 	// Prefer the pretty application name in the "FileDescription" field
 	StringCchPrintfW(key, countof(key), L"\\StringFileInfo\\%04x%04x\\FileDescription", translation[0].language, translation[0].codepage);
 
-	if (VerQueryValueW(versionInfo.data, key, (void *)&value.text, &value.length) && wcslen(value.text) > 0) {
+	if (VerQueryValueW(versionInfo.data, key, (void *)&value.text, &value.length) && StringLength(value.text, value.length) > 0) {
 		goto success;
 	}
 
 	// Fall back to "ProductName" if "FileDescription" is empty. Example: Github Desktop
 	StringCchPrintfW(key, countof(key), L"\\StringFileInfo\\%04x%04x\\ProductName", translation[0].language, translation[0].codepage);
 
-	if (VerQueryValueW(versionInfo.data, key, (void *)&value.text, &value.length) && wcslen(value.text) > 0) {
+	if (VerQueryValueW(versionInfo.data, key, (void *)&value.text, &value.length) && StringLength(value.text, value.length) > 0) {
 		goto success;
 	}
 
@@ -380,8 +403,11 @@ static string GetAppName(string *filepath)
 	goto free;
 
 	success:
-		name.length = value.length < countof(name.text) ? value.length : countof(name.text);
-		name.ok = SUCCEEDED(StringCchCopyNW(name.text, countof(name.text)-1, value.text, countof(name.text)-1));
+		if (SUCCEEDED(StringCchCopyNW(name.text, countof(name.text)-1, value.text, value.length))) {
+			name.length = value.length < countof(name.text) ? value.length : countof(name.text);
+		} else {
+			name.length = -1;
+		}
 	free:
 		free(versionInfo.data);
 	abort:
@@ -462,8 +488,14 @@ static void SetAutorun(bool enabled, u16 *keyname, u16 *args)
 	string filepath;
 	string target;
 	filepath.length = GetModuleFileNameW(null, filepath.text, countof(filepath.text)-1); // Get filepath of current module
+	if (filepath.length <= 0) {
+		filepath.length = -1;
+	}
 	StringCchPrintfW(target.text, countof(target.text)-1, L"\"%s\" %s", filepath.text, args);
-	target.length = wcslen(target.text);
+	target.length = StringLength(target.text, countof(target.text));
+	if (target.length <= 0) {
+		target.length = -1;
+	}
 	HKEY regkey;
 	i32 success; // BUG Not checking 'success' below
 	if (enabled) {
@@ -907,7 +939,7 @@ static void AddToHistory(handle hwnd) {
 	}
 	// Get module filepath, abort if failed (most likely access denied)
 	string filepath = GetExePath(hwnd);
-	if (!filepath.ok) {
+	if (filepath.length <= 0) {
 		return; // Don't have to print error, since GetExePath already does that
 	}
 	// Check window against user-defined blacklist
@@ -946,7 +978,7 @@ static void AddToApps(handle hwnd)
 	}
 	// 3. Get module filepath, abort if failed (most likely access denied)
 	string filepath = GetExePath(hwnd);
-	if (!filepath.ok) {
+	if (filepath.length <= 0) {
 		return; // Don't have to print error, since GetExePath already does that
 	}
 	// 4. Check window against user-defined blacklist
@@ -1322,7 +1354,9 @@ static void RedrawSwitcher(void)
 			} else {
 				title.length = swprintf(title.text, countof(title.text), L"%ls", app->name.text);
 			}
-			title.ok = (title.length > 0);
+			if (title.length <= 0) {
+				title.length = -1;
+			}
 
 			// Draw app name
 			u16 *titleText = title.text;
