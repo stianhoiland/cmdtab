@@ -44,6 +44,7 @@
 #include <mmsystem.h> // PlaySound
 #include <shellscalingapi.h> // GetDpiForMonitor
 
+#ifdef _MSC_VER
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "shlwapi.lib") // Only used by StringFileName for PathFindFileNameW?
 #pragma comment(lib, "dwmapi.lib")
@@ -51,8 +52,8 @@
 #pragma comment(lib, "version.lib")
 #pragma comment(lib, "winmm.lib") // PlaySound
 #pragma comment(lib, "shcore.lib") // GetDpiForMonitor
-
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='amd64' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#endif
 
 //==============================================================================
 // Utility belt
