@@ -1653,17 +1653,17 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			// Deactivation
 			// ========================================
 
-			bool escDown = keyCode == VK_ESCAPE && !keyDown;
-			bool enterDown = keyCode == VK_RETURN && !keyDown;
+			bool escUp = keyCode == VK_ESCAPE && !keyDown;
+			bool enterUp = keyCode == VK_RETURN && !keyDown;
 
 			// Alt-Enter - switch to selected window
-			if (enterDown) {
+			if (enterUp) {
 				ShowSelectedWindow();
 				HideSwitcher();
 				goto consumeMessage;
 			}
 			// Alt-Esc - cancel switching and restore initial window
-			if (escDown) { // BUG There's a bug here if mod1Held and mod2Held aren't both the same key. In that case I'll still pass through the key event, even though I should own it since it's not Alt-Esc
+			if (escUp) { // BUG There's a bug here if mod1Held and mod2Held aren't both the same key. In that case I'll still pass through the key event, even though I should own it since it's not Alt-Esc
 				HideSwitcher();
 				goto consumeMessage;
 			}
@@ -1678,7 +1678,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			bool deleteDown = keyCode == VK_DELETE && keyDown;
 			bool keyMDown   = keyCode == 'M' && keyDown;
 			bool keyHDown   = keyCode == 'H' && keyDown;
-			bool keyBDown   = keyCode == 'B' && !keyDown;
+			bool keyBUp     = keyCode == 'B' && !keyDown;
 			bool keyGDown   = keyCode == 'G' && keyDown;
 
 			// Alt-F4 - quit cmdtab
@@ -1719,7 +1719,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				goto consumeMessage;
 			}
 			// Alt-B - display app name and window class to user, to add in blacklist
-			if (keyBDown) {
+			if (keyBUp) {
 				handle selectedWindow = *SelectedWindow; // HideSwitcher resets SelectedWindow
 				HideSwitcher();
 				ReportWindowHandle(Switcher, selectedWindow);
