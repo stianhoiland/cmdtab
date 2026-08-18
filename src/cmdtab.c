@@ -155,45 +155,45 @@ static i64 FinishMeasuring(i64 start)
 
 static void Print(u16 *fmt, ...)
 {
-	u16 buffer[2048];
+	u16 buffer[2048], *end;
 	va_list args;
 	va_start(args, fmt);
-	StringCchVPrintfW(buffer, countof(buffer)-1, fmt, args);
+	StringCchVPrintfExW(buffer, countof(buffer)-1, &end, null, 0, fmt, args);
 	va_end(args);
 	#ifdef _MSC_VER
 	  OutputDebugStringW(buffer);
 	#else
-	  fputws(buffer, stdout);
+	  WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), buffer, end - buffer, null, null);
 	#endif
 }
 
 static void Log(u16 *fmt, ...)
 {
 	#ifdef _DEBUG
-	u16 buffer[2048];
+	u16 buffer[2048], *end;
 	va_list args;
 	va_start(args, fmt);
-	StringCchVPrintfW(buffer, countof(buffer)-1, fmt, args);
+	StringCchVPrintfExW(buffer, countof(buffer)-1, &end, null, 0, fmt, args);
 	va_end(args);
 	#ifdef _MSC_VER
 	  OutputDebugStringW(buffer);
 	#else
-	  fputws(buffer, stdout);
+	  WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), buffer, end - buffer, null, null);
 	#endif
 	#endif
 }
 
 static void Error(handle hwnd, u16 *fmt, ...)
 {
-	u16 buffer[2048];
+	u16 buffer[2048], *end;
 	va_list args;
 	va_start(args, fmt);
-	StringCchVPrintfW(buffer, countof(buffer)-1, fmt, args);
+	StringCchVPrintfExW(buffer, countof(buffer)-1, &end, null, 0, fmt, args);
 	va_end(args);
 	#ifdef _MSC_VER
 	  OutputDebugStringW(buffer);
 	#else
-	  fputws(buffer, stdout);
+	  WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), buffer, end - buffer, null, null);
 	#endif
 	SetForegroundWindow(GetLastActivePopup(hwnd));
 	MessageBoxW(hwnd, buffer, L"cmdtab", MB_OK | MB_ICONERROR | MB_TASKMODAL);
