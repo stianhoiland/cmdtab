@@ -702,6 +702,8 @@ static HBRUSH      DrawingBg;       // Window background
 static HBRUSH      SelectionBg;     // Selection background
 static HPEN        SelectionOutline;// Selection rectangle pen
 static i32         MouseX, MouseY;  // Mouse position, for highlighting and clicking app icons in switcher
+static struct app *MouseApp;        // Pointer to one of the elements in 'Apps' array. The app under MouseX,MouseY
+
 
 //================
 // Initialization
@@ -1318,7 +1320,9 @@ static void DrawApp(struct app *app, RECT appRect, RECT windowRect)
 		// Draw selection rectangle and icon, with selection background
 		RoundRect(DrawingContext, appRect.left - SEL_VERT_OFF, appRect.top - SEL_HORZ_OFF, appRect.right + SEL_VERT_OFF, appRect.bottom + SEL_HORZ_OFF, SEL_RADIUS, SEL_RADIUS);
 		DrawIconEx(DrawingContext, appRect.left, appRect.top, app->icon, width, height, 0, SelectionBg, DI_NORMAL);
+	}
 
+	if ((app == SelectedApp && !MouseApp) || app == MouseApp) {
 		// Add window count to app name
 		string title = {0};
 		if (app->windowsCount > 1) {
@@ -1513,6 +1517,7 @@ static void HideSwitcher(void)
 	// Reset selection
 	SelectedApp = null;
 	SelectedWindow = null;
+	MouseApp = null;
 }
 
 //static void CloseWindows(handle hwnd) // Alternative to TerminateWindowProcess
@@ -1905,17 +1910,15 @@ static i64 OnSwitcherMouseMove(i32 x, i32 y)
 		return 0;
 	}
 
-	struct app *mouseoverApp = GetAppForPosition(MouseX, MouseY);
+	struct app *newMouseApp = GetAppForPosition(MouseX, MouseY);
 
-	if (SelectedApp != mouseoverApp && mouseoverApp) {
-		SelectedApp = mouseoverApp;
-		SelectedWindow = &SelectedApp->windows[0];
-		/*dbg*/Log(L"select app ");
-		/*dbg*/LogWindow(*SelectedWindow);
+	if (MouseApp != newMouseApp) {
+		MouseApp = newMouseApp;
+		/*dbg*/Log(L"mouseover app ");
+		/*dbg*/LogWindow(MouseApp ? MouseApp->windows[0] : null);
 		RedrawSwitcher();
 	}
-
-	if (mouseoverApp) {
+	if (MouseApp) {
 		SetCursor(LoadCursorW(null, IDC_HAND));
 	} else {
 		SetCursor(LoadCursorW(null, IDC_ARROW));
@@ -1926,8 +1929,15 @@ static i64 OnSwitcherMouseMove(i32 x, i32 y)
 
 static i64 OnSwitcherMouseUp(void)
 {
-	ShowSelectedWindow();
-	HideSwitcher();
+	if (MouseApp) {
+		SelectedApp = MouseApp;
+		SelectedWindow = &SelectedApp->windows[0];
+		/*dbg*/Log(L"select app ");
+		/*dbg*/LogWindow(*SelectedWindow);
+		ShowSelectedWindow();
+		HideSwitcher();
+	}
+	SetCursor(LoadCursorW(null, IDC_ARROW));
 	return 1;
 }
 
