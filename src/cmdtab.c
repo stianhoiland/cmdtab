@@ -663,7 +663,7 @@ struct ini { // cmdtab settings
 
 struct app {
 	string path;                // Full path of app executable
-	string name;                // Product description/name, or filename without extension as fallback
+	string title;               // Product description/name from ver. info, or filename without extension as fallback
 	handle icon;                // Big app icon
 	handle windows[64];         // App windows that can be switched to
 	iz windowsCount;            // Number of elements in 'windows' array
@@ -1010,7 +1010,7 @@ static void AddToApps(handle hwnd)
 		struct app *window = &Apps[AppsCount++];
 		if (window->icon) DestroyIcon(window->icon);
 		window->path = app->path;
-		window->name = GetWindowTitle(hwnd);
+		window->title = GetWindowTitle(hwnd);
 		window->icon = app->icon; // TODO Does this lead to double free app->icon?
 		window->windowsCount = 0;
 		//
@@ -1026,7 +1026,7 @@ static void AddToApps(handle hwnd)
 		app = &Apps[AppsCount++];
 		if (app->icon) DestroyIcon(app->icon); // In fact, I have to do a little lazy cleanup
 		app->path = filepath;
-		app->name = title;
+		app->title = title;
 		app->icon = GetAppIcon(&filepath);
 		app->windowsCount = 0; // Same truncation trick here (but hwnds are not structs, so no fields to overwrite)
 	}
@@ -1350,9 +1350,9 @@ static void RedrawSwitcher(void)
 			// Add window count to app name
 			string title = {0};
 			if (app->windowsCount > 1) {
-				title.length = swprintf(title.text, countof(title.text), L"%ls (%u)", app->name.text, app->windowsCount);
+				title.length = swprintf(title.text, countof(title.text), L"%ls (%u)", app->title.text, app->windowsCount);
 			} else {
-				title.length = swprintf(title.text, countof(title.text), L"%ls", app->name.text);
+				title.length = swprintf(title.text, countof(title.text), L"%ls", app->title.text);
 			}
 			if (title.length <= 0) {
 				title.length = -1;
