@@ -361,7 +361,7 @@ static string GetAppName(string *filepath)
 	if (!(versionInfo.size = GetFileVersionInfoSizeW(filepath->text, null))) {
 		goto abort;
 	}
-	if (!(versionInfo.data = malloc(versionInfo.size))) {
+	if (!(versionInfo.data = HeapAlloc(GetProcessHeap(), 0, versionInfo.size))) {
 		goto abort;
 	}
 	if (!GetFileVersionInfoW(filepath->text, 0, versionInfo.size, versionInfo.data)) {
@@ -409,7 +409,7 @@ static string GetAppName(string *filepath)
 			name.length = -1;
 		}
 	free:
-		free(versionInfo.data);
+		HeapFree(GetProcessHeap(), 0, versionInfo.data);
 	abort:
 		return name;
 }
