@@ -1876,9 +1876,9 @@ static i64 OnSwitcherMouseMove(i32 x, i32 y)
 	}
 
 	if (mouseoverApp) {
-		SetCursor(LoadCursor(null, IDC_HAND));
+		SetCursor(LoadCursorW(null, IDC_HAND));
 	} else {
-		SetCursor(LoadCursor(null, IDC_ARROW));
+		SetCursor(LoadCursorW(null, IDC_ARROW));
 	}
 
 	return 1;
