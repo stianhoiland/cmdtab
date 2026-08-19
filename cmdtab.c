@@ -64,7 +64,6 @@
 
 #define false 0
 #define true 1
-#define null NULL // WHY IS EVERYONE SCREAMING
 
 typedef unsigned char        u8;
 typedef wchar_t             u16; // "Microsoft implements wchar_t as a two-byte unsigned value."
@@ -158,12 +157,12 @@ static void Print(u16 *fmt, ...)
 	u16 buffer[2048], *end;
 	va_list args;
 	va_start(args, fmt);
-	StringCchVPrintfExW(buffer, countof(buffer)-1, &end, null, 0, fmt, args);
+	StringCchVPrintfExW(buffer, countof(buffer)-1, &end, NULL, 0, fmt, args);
 	va_end(args);
 	#ifdef _MSC_VER
 	  OutputDebugStringW(buffer);
 	#else
-	  WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), buffer, end - buffer, null, null);
+	  WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), buffer, end - buffer, NULL, NULL);
 	#endif
 }
 
@@ -173,12 +172,12 @@ static void Log(u16 *fmt, ...)
 	u16 buffer[2048], *end;
 	va_list args;
 	va_start(args, fmt);
-	StringCchVPrintfExW(buffer, countof(buffer)-1, &end, null, 0, fmt, args);
+	StringCchVPrintfExW(buffer, countof(buffer)-1, &end, NULL, 0, fmt, args);
 	va_end(args);
 	#ifdef _MSC_VER
 	  OutputDebugStringW(buffer);
 	#else
-	  WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), buffer, end - buffer, null, null);
+	  WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), buffer, end - buffer, NULL, NULL);
 	#endif
 	#endif
 }
@@ -188,12 +187,12 @@ static void Error(handle hwnd, u16 *fmt, ...)
 	u16 buffer[2048], *end;
 	va_list args;
 	va_start(args, fmt);
-	StringCchVPrintfExW(buffer, countof(buffer)-1, &end, null, 0, fmt, args);
+	StringCchVPrintfExW(buffer, countof(buffer)-1, &end, NULL, 0, fmt, args);
 	va_end(args);
 	#ifdef _MSC_VER
 	  OutputDebugStringW(buffer);
 	#else
-	  WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), buffer, end - buffer, null, null);
+	  WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), buffer, end - buffer, NULL, NULL);
 	#endif
 	SetForegroundWindow(GetLastActivePopup(hwnd));
 	MessageBoxW(hwnd, buffer, L"cmdtab", MB_OK | MB_ICONERROR | MB_TASKMODAL);
@@ -343,7 +342,7 @@ static void LogWindow(handle hwnd)
 		Log(L"%p\n", hwnd);
 		#endif
 	} else {
-		Log(L"null hwnd\n");
+		Log(L"NULL hwnd\n");
 	}
 }
 
@@ -358,7 +357,7 @@ static string GetAppName(string *filepath)
 		u32 size;
 	} versionInfo;
 
-	if (!(versionInfo.size = GetFileVersionInfoSizeW(filepath->text, null))) {
+	if (!(versionInfo.size = GetFileVersionInfoSizeW(filepath->text, NULL))) {
 		goto abort;
 	}
 	if (!(versionInfo.data = HeapAlloc(GetProcessHeap(), 0, versionInfo.size))) {
@@ -373,7 +372,7 @@ static string GetAppName(string *filepath)
 		u16 codepage;
 	} *translation;
 
-	if (!VerQueryValueW(versionInfo.data, L"\\VarFileInfo\\Translation", (void *)&translation, null)) {
+	if (!VerQueryValueW(versionInfo.data, L"\\VarFileInfo\\Translation", (void *)&translation, NULL)) {
 		goto free;
 	}
 
@@ -438,12 +437,12 @@ static handle GetAppIcon(string *filepath)
 	// NOTE: Can also check out SHDefExtractIcon
 	//       https://devblogs.microsoft.com/oldnewthing/20140501-00/?p=1103
 
-	//if (FAILED(CoInitialize(null))) {
-	//	return null;
+	//if (FAILED(CoInitialize(NULL))) {
+	//	return NULL;
 	//}
 	IImageList *list = {0};
 	if (FAILED(SHGetImageList(SHIL_JUMBO, &IID_IImageList, (void **)&list))) {
-		return null;
+		return NULL;
 	}
 	SHFILEINFOW info = {0};
 	if (!SHGetFileInfoW(filepath->text, 0, &info, sizeof info, SHGFI_SYSICONINDEX)) { // 2nd arg: -1, 0 or FILE_ATTRIBUTE_NORMAL
@@ -452,7 +451,7 @@ static handle GetAppIcon(string *filepath)
 		__debugbreak();
 		#endif
 		IImageList_Release(list);
-		return null;
+		return NULL;
 	}
 	HICON icon = {0};
 	IImageList_GetIcon(list, info.iIcon, ILD_TRANSPARENT, &icon);
@@ -464,7 +463,7 @@ static bool IsDarkModeEnabled(void)
 {
 	ULONG value;
 	ULONG size = sizeof value;
-	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_DWORD, null, &value, &size)) {
+	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme", RRF_RT_DWORD, NULL, &value, &size)) {
 		return !value; // 'value' is true for light mode
 	} else {
 		return true; // Default to dark mode
@@ -475,7 +474,7 @@ static u32 GetAccentColor(void)
 {
 	ULONG value;
 	ULONG size = sizeof value;
-	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM\\", L"AccentColor", RRF_RT_DWORD, null, &value, &size)) {
+	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM\\", L"AccentColor", RRF_RT_DWORD, NULL, &value, &size)) {
 		return value;
 	} else {
 		//       AABBGGRR
@@ -487,7 +486,7 @@ static void SetAutorun(bool enabled, u16 *keyname, u16 *args)
 {
 	string filepath;
 	string target;
-	filepath.length = GetModuleFileNameW(null, filepath.text, countof(filepath.text)-1); // Get filepath of current module
+	filepath.length = GetModuleFileNameW(NULL, filepath.text, countof(filepath.text)-1); // Get filepath of current module
 	if (filepath.length <= 0) {
 		filepath.length = -1;
 	}
@@ -499,7 +498,7 @@ static void SetAutorun(bool enabled, u16 *keyname, u16 *args)
 	HKEY regkey;
 	i32 success; // BUG Not checking 'success' below
 	if (enabled) {
-		success = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, null, 0, KEY_SET_VALUE, null, &regkey, null);
+		success = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, NULL, 0, KEY_SET_VALUE, NULL, &regkey, NULL);
 		success = RegSetValueExW(regkey, keyname, 0, REG_SZ, (UCHAR *)target.text, target.length * sizeof *target.text); // TODO Oof, that's a nasty cast
 		success = RegCloseKey(regkey);
 	} else {
@@ -513,7 +512,7 @@ static void SetAutorun(bool enabled, u16 *keyname, u16 *args)
 static int GetRegKey(u16 *keyname) {
 	ULONG value;
 	ULONG size = sizeof value;
-	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\stianhoiland\\cmdtab\\", keyname, RRF_RT_DWORD, null, &value, &size)) {
+	if (!RegGetValueW(HKEY_CURRENT_USER, L"Software\\stianhoiland\\cmdtab\\", keyname, RRF_RT_DWORD, NULL, &value, &size)) {
 		return value;
 	} else {
 		return -1;
@@ -523,7 +522,7 @@ static int GetRegKey(u16 *keyname) {
 static void SetRegKey(u16 *keyname, int value) {
 	HKEY regkey;
 	i32 success; // BUG Not checking 'success' below
-	success = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\stianhoiland\\cmdtab\\", 0, null, 0, KEY_SET_VALUE, null, &regkey, null);
+	success = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\stianhoiland\\cmdtab\\", 0, NULL, 0, KEY_SET_VALUE, NULL, &regkey, NULL);
 	success = RegSetValueExW(regkey, keyname, 0, REG_DWORD, (VOID *)&value, 4);
 	success = RegCloseKey(regkey);
 	(void)success;
@@ -573,7 +572,7 @@ static void ShowWindowX(handle hwnd) // ShowWindow already taken
 		} else {
 			Log(L"ERROR couldn't switch to:");
 			LogWindow(hwnd);
-			PlaySound(L"SystemHand", null, SND_ASYNC);
+			PlaySound(L"SystemHand", NULL, SND_ASYNC);
 			//HideSwitcher(); // need forward decl
 		}
 	} else {
@@ -657,8 +656,8 @@ struct ini {
 	u32 fontSize;
 	// Blacklist
 	struct identifier {
-		u16 *filename;          // Filename without file extension, ex. "explorer". Can be null
-		u16 *windowClass;       // Window class name. Can be null
+		u16 *filename;          // Filename without file extension, ex. "explorer". Can be NULL
+		u16 *windowClass;       // Window class name. Can be NULL
 	} blacklist[32];
 };
 
@@ -740,7 +739,7 @@ static void InitConfig(void)
 		.fontSize                = 16,
 		// Blacklist
 		.blacklist = {
-			{ null,                       L"ApplicationFrameWindow" },
+			{ NULL,                       L"ApplicationFrameWindow" },
 			{ L"SearchHost",              L"Windows.UI.Core.CoreWindow" },
 			{ L"StartMenuExperienceHost", L"Windows.UI.Core.CoreWindow" },
 		},
@@ -778,27 +777,27 @@ static void AskAutorun(void)
 
 static bool AlreadyRunning(void)
 {
-	Mutex = CreateMutexW(null, true, L"cmdtabMutex");
+	Mutex = CreateMutexW(NULL, true, L"cmdtabMutex");
 	return GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
 static void QuitSecondInstance(void)
 {
-	MessageBoxW(null, L"cmdtab is already running.", L"cmdtab", MB_OK | MB_ICONINFORMATION | MB_TASKMODAL);
+	MessageBoxW(NULL, L"cmdtab is already running.", L"cmdtab", MB_OK | MB_ICONINFORMATION | MB_TASKMODAL);
 	ExitProcess(0);
 }
 
 static void InitWindowActivationTracking(void)
 {
 	// Install event hooks for foreground window changes. Raymond Chen: https://devblogs.microsoft.com/oldnewthing/20130930-00/?p=3083
-	HistoryHooks[0] = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, null, EventHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
-	HistoryHooks[1] = SetWinEventHook(EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_UNCLOAKED, null, EventHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
+	HistoryHooks[0] = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, NULL, EventHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
+	HistoryHooks[1] = SetWinEventHook(EVENT_OBJECT_UNCLOAKED, EVENT_OBJECT_UNCLOAKED, NULL, EventHookProcedure, 0, 0, WINEVENT_OUTOFCONTEXT);
 }
 
 static void InitKeyboardHook(void)
 {
 	// Install keyboard hook
-	KeyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHookProcedure, null, 0);
+	KeyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHookProcedure, NULL, 0);
 }
 
 static void InitSwitcherWindow(handle instance)
@@ -808,10 +807,10 @@ static void InitSwitcherWindow(handle instance)
 	wcex.cbSize = sizeof wcex;
 	wcex.lpfnWndProc = SwitcherWindowProcedure;
 	wcex.hInstance = instance;
-	wcex.hCursor = LoadCursorW(null, IDC_ARROW);
+	wcex.hCursor = LoadCursorW(NULL, IDC_ARROW);
 	wcex.lpszClassName = L"cmdtabSwitcher";
 	// TOOLWINDOW so the switcher itself does not appear as an Alt-Tab window (see IsAltTabWindow)
-	Switcher = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, MAKEINTATOM(RegisterClassExW(&wcex)), null, 0, 0, 0, 0, 0, null, null, instance, null);
+	Switcher = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, MAKEINTATOM(RegisterClassExW(&wcex)), NULL, 0, 0, 0, 0, 0, NULL, NULL, instance, NULL);
 	// Clear all window styles for very plain window
 	SetWindowLongW(Switcher, GWL_STYLE, 0);
 	// Rounded window corners
@@ -838,7 +837,7 @@ static int RunCmdTab(handle instance, u16 *args)
 	InitConfig();
 
 	//
-	i32 _ = CoInitialize(null);
+	i32 _ = CoInitialize(NULL);
 
 	InitSwitcherWindow(instance);
 	InitWindowActivationTracking();
@@ -861,7 +860,7 @@ static int RunCmdTab(handle instance, u16 *args)
 	bool hasLeaks = _CrtDumpMemoryLeaks();
 	Log(L"leaks? %s\n", hasLeaks ? L"YES" : L"No leaks.");
 	if (hasLeaks) {
-		Error(null, L"There were memory leaks.");
+		Error(NULL, L"There were memory leaks.");
 	}
 	return hasLeaks;
 }
@@ -907,9 +906,9 @@ static bool WindowIsBlacklisted(string *filename, string *windowClass)
 
 	// Iterate blacklist. I allow three kinds of entries in the black list:
 	// 1) {name,class} both name and class are specified and both must match
-	// 2) {name,null}  only name is specified and must match
-	// 3) {null,class} only class is specified and must match
-	// 4) {null,null}  terminates array
+	// 2) {name,NULL}  only name is specified and must match
+	// 3) {NULL,class} only class is specified and must match
+	// 4) {NULL,NULL}  terminates array
 
 	for (iz i = 0; i < countof(Config.blacklist); i++) {
 		struct identifier ignored = Config.blacklist[i];
@@ -1011,7 +1010,7 @@ static void AddToApps(handle hwnd)
 		return;
 	}
 	// 5. Find existing app with same module filepath
-	struct app *app = null;
+	struct app *app = NULL;
 	for (int i = 0; i < AppsCount; i++) {
 		if (StringsAreEqual(&filepath, &Apps[i].path)) {
 			app = &Apps[i];
@@ -1064,8 +1063,8 @@ static void AddToApps(handle hwnd)
 static void ActivateWindow(handle hwnd)
 {
 	// Find existing app and window
-	struct app *app = null;
-	handle *window = null;
+	struct app *app = NULL;
+	handle *window = NULL;
 	for (int i = 0; i < AppsCount; i++) {
 		app = &Apps[i];
 		for (int j = 0; j < app->windowsCount; j++) {
@@ -1132,8 +1131,8 @@ static void SelectFirstApp(void)
 		SelectedApp = &Apps[0];
 		SelectedWindow = &Apps[0].windows[0];
 	} else {
-		SelectedApp = null;
-		SelectedWindow = null;
+		SelectedApp = NULL;
+		SelectedWindow = NULL;
 		Log(L"nothing to select\n");
 	}
 	/*dbg*/
@@ -1312,7 +1311,7 @@ static void DrawApp(struct app *app, RECT appRect, RECT windowRect)
 	i32  width = ICON_WIDTH;
 	i32 height = ICON_WIDTH;
 
-	bool hasMouseover = MouseApp != null;
+	bool hasMouseover = MouseApp != NULL;
 	bool hasMousedown = hasMouseover && MouseDown;
 	bool isSelected = SelectedApp == app && app;
 	bool isMouseover = MouseApp == app && app;
@@ -1484,7 +1483,7 @@ static void RedrawSwitcher(void)
 	}
 
 	// Invalidate window rectangle
-	RedrawWindow(Switcher, null, null, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
+	RedrawWindow(Switcher, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
 }
 
 static struct app *GetAppForPosition(i32 x, i32 y)
@@ -1527,7 +1526,7 @@ static struct app *GetAppForPosition(i32 x, i32 y)
 		}
 	}
 
-	return null;
+	return NULL;
 }
 
 static void ShowSwitcher(void)
@@ -1565,9 +1564,9 @@ static void HideSwitcher(void)
 	HideWindow(Switcher);
 	LockSetForegroundWindow(LSFW_UNLOCK);
 	// Reset selection
-	SelectedApp = null;
-	SelectedWindow = null;
-	MouseApp = null;
+	SelectedApp = NULL;
+	SelectedWindow = NULL;
+	MouseApp = NULL;
 }
 
 //static void CloseWindows(handle hwnd) // Alternative to TerminateWindowProcess
@@ -1575,8 +1574,8 @@ static void HideSwitcher(void)
 //	if (AppsCount <= 0) {
 //		return;
 //	}
-//	struct app *app = null;
-//	handle *window = null;
+//	struct app *app = NULL;
+//	handle *window = NULL;
 //	for (int i = 0; i < AppsCount; i++) {
 //		app = &Apps[i];
 //		for (int j = 0; j < app->windowsCount; j++) {
@@ -1609,7 +1608,7 @@ static bool SetKey(u32 key, bool down)
 static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lparam)
 {
 	if (code < 0) { // "If code is less than zero, the hook procedure must pass the message to..." blah blah blah read the docs
-		return CallNextHookEx(null, code, wparam, lparam);
+		return CallNextHookEx(NULL, code, wparam, lparam);
 	}
 
 	KBDLLHOOKSTRUCT *kbd = (KBDLLHOOKSTRUCT *)lparam;
@@ -1626,7 +1625,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 		goto passMessage;
 	}
 
-	// (SelectedWindow == null) means Switcher is not active/visible
+	// (SelectedWindow == NULL) means Switcher is not active/visible
 	if (!SelectedWindow) {
 
 		bool keyRepeat = SetKey(keyCode, keyDown); // Manually track key repeat
@@ -1686,7 +1685,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 			goto consumeMessage;
 		}
 
-	} else { // (SelectedWindow != null) means switcher is active/visible
+	} else { // (SelectedWindow != NULL) means switcher is active/visible
 
 		bool mod1Up = keyCode == Config.hotkeyForApps.mod && !keyDown;
 		bool mod2Up = keyCode == Config.hotkeyForWindows.mod && !keyDown;
@@ -1828,8 +1827,8 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 				UpdateApps();
 				ResizeSwitcher(); // Since we have called UpdateApps() above
 				// Find existing app and window
-				struct app *app = null;
-				handle *window = null;
+				struct app *app = NULL;
+				handle *window = NULL;
 				for (int i = 0; i < AppsCount; i++) {
 					app = &Apps[i];
 					for (int j = 0; j < app->windowsCount; j++) {
@@ -1889,7 +1888,7 @@ static LRESULT CALLBACK KeyboardHookProcedure(int code, WPARAM wparam, LPARAM lp
 
 	passMessage:
 		//Log(L"passMessage\n");
-		return CallNextHookEx(null, code, wparam, lparam);
+		return CallNextHookEx(NULL, code, wparam, lparam);
 	consumeMessage:
 		// By returning a non-zero value from the hook procedure, the message
 		// is consumed and does not get passed to the target window
@@ -1965,13 +1964,13 @@ static i64 OnSwitcherMouseMove(i32 x, i32 y)
 	if (MouseApp != newMouseApp) {
 		MouseApp = newMouseApp;
 		/*dbg*/Log(L"mouseover app ");
-		/*dbg*/LogWindow(MouseApp ? MouseApp->windows[0] : null);
+		/*dbg*/LogWindow(MouseApp ? MouseApp->windows[0] : NULL);
 		RedrawSwitcher();
 	}
 	if (MouseApp) {
-		SetCursor(LoadCursorW(null, IDC_HAND));
+		SetCursor(LoadCursorW(NULL, IDC_HAND));
 	} else {
-		SetCursor(LoadCursorW(null, IDC_ARROW));
+		SetCursor(LoadCursorW(NULL, IDC_ARROW));
 	}
 
 	return 1;
@@ -1982,9 +1981,9 @@ static i64 OnSwitcherMouseDown(void)
 	MouseDown = true;
 	RedrawSwitcher();
 	if (MouseApp) {
-		SetCursor(LoadCursorW(null, IDC_HAND));
+		SetCursor(LoadCursorW(NULL, IDC_HAND));
 	} else {
-		SetCursor(LoadCursorW(null, IDC_ARROW));
+		SetCursor(LoadCursorW(NULL, IDC_ARROW));
 	}
 	return 1;
 }
@@ -2000,7 +1999,7 @@ static i64 OnSwitcherMouseUp(void)
 		ShowSelectedWindow();
 		HideSwitcher();
 	}
-	SetCursor(LoadCursorW(null, IDC_ARROW));
+	SetCursor(LoadCursorW(NULL, IDC_ARROW));
 	return 1;
 }
 
