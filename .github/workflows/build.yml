@@ -1,0 +1,133 @@
+# Verifiable builds: every artifact published by this repository is compiled
+# from source on GitHub-hosted runners and accompanied by a signed SLSA build
+# provenance attestation. See "Verifying releases" in README.md.
+#
+# Artifacts are built with mingw-w64 GCC, mirroring the flags of the
+# Makefile's `release` target — the same toolchain used for local development —
+# so the published binary matches what the maintainer builds and tests.
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (mingw-w64 GCC, x86_64)
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      # Required to sign and store build provenance attestations
+      id-token: write
+      attestations: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Read version from res/cmdtab.rc
+        id: version
+        shell: pwsh
+        run: |
+          $m = Select-String -Path res/cmdtab.rc -Pattern 'VALUE "FileVersion",\s*"([^"]+)"'
+          if (-not $m) { throw "FileVersion not found in res/cmdtab.rc" }
+          $version = $m.Matches[0].Groups[1].Value
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Version: $version"
+
+      - name: Check tag matches res/cmdtab.rc version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if ($env:TAG -ne "v$env:VERSION") {
+            throw "Tag $env:TAG does not match FileVersion $env:VERSION in res/cmdtab.rc"
+          }
+
+      - name: Install mingw-w64 toolchain (preinstalled MSYS2)
+        shell: pwsh
+        run: |
+          C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed `
+            mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils
+          C:\msys64\ucrt64\bin\gcc.exe --version | Select-Object -First 1
+          C:\msys64\ucrt64\bin\windres.exe --version | Select-Object -First 1
+
+      # Mirrors the Makefile's `release` target:
+      #   CFLAGS = -std=c99 -Oz -DNDEBUG=1 -mwindows, LDFLAGS = -s
+      - name: Build
+        shell: pwsh
+        run: |
+          $env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
+          windres -I res/ -o res/cmdtab.o res/cmdtab.rc
+          if ($LASTEXITCODE -ne 0) { throw "windres failed" }
+          gcc -std=c99 -Oz -DNDEBUG=1 -mwindows -s -o cmdtab.exe src/cmdtab.c res/cmdtab.o `
+            -lole32 -lcomctl32 -lgdi32 -lshlwapi -ldwmapi -lpathcch -lversion -lwinmm -lshcore
+          if ($LASTEXITCODE -ne 0) { throw "gcc failed" }
+          Get-Item cmdtab.exe | Format-List Name, Length
+
+      - name: Package
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $zip = "cmdtab-v$env:VERSION-win-x86_64.zip"
+          Compress-Archive -Path cmdtab.exe -DestinationPath $zip
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item cmdtab.exe dist/
+          Copy-Item $zip dist/
+          Get-ChildItem dist -File | Where-Object Name -ne 'SHA256SUMS' | ForEach-Object {
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
+          } | Out-File -FilePath dist/SHA256SUMS -Encoding ascii
+          Get-Content dist/SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            dist/cmdtab.exe
+            dist/cmdtab-v*.zip
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cmdtab-v${{ steps.version.outputs.version }}-win-x86_64
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cmdtab-v${{ needs.build.outputs.version }}-win-x86_64
+          path: dist
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --verify-tag \
+            --title "cmdtab $TAG" \
+            --notes "Built from source by GitHub Actions run [\`$GITHUB_RUN_ID\`]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) at commit \`$GITHUB_SHA\`. See the *Verifying releases* section of the README to verify provenance." \
+            dist/cmdtab-v*.zip dist/SHA256SUMS
