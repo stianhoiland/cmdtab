@@ -18,14 +18,14 @@ else
 CFLAGS    += $(WARNINGS) -ggdb3 -Og -D_DEBUG=1 -DDEBUG=1
 endif
 
-cmdtab.exe: src/cmdtab.c res/cmdtab.o
+cmdtab.exe: cmdtab.c cmdtab.o
 	$(CC) $(CFLAGS) $(LDFLAGS) $(INCLUDE) -o $@ $^ $(LDLIBS)
 
-%.o: %.rc
-	windres -I res/ -o $@ $^
+cmdtab.o: cmdtab.rc
+	windres $^ $@
 
 clean:
-	rm cmdtab.exe res/cmdtab.o || true
+	rm cmdtab.exe cmdtab.o || true
 
 run: cmdtab.exe
 	pkill cmdtab.exe || true
