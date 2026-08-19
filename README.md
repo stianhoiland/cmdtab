@@ -1,12 +1,12 @@
 # cmdtab
-Fast and super lightweight macOS-style Alt-Tab app/window switcher replacement for Windows, written in the Lord's language, C.
+Fast and lightweight Alt-Tab window switcher replacement for Windows in macOS-style. Written in the Lord's language, C.
 
 ![cmdtab-screenshot](https://github.com/stianhoiland/cmdtab/assets/2081712/ec5d0d61-005f-4123-b191-8d5b49d1f7db)
 
 ### What's the deal?
 1. On Windows Alt-Tab cycles through different windows from different apps all mixed together, showing small window previews
 2. On macOS Cmd-Tab cycles through different apps, showing big, clear app icons
-3. On macOS there is a separate hotkey that cycles through windows of the same app
+3. On macOS there is an additional hotkey that cycles through windows of the same app
 
 Here's a real life comparison GIF between Alt-Tab and **cmdtab** (notice the scrollbar in Alt-Tab, haha):
 
@@ -17,29 +17,28 @@ So, you like the way Apple does it, but you're using Windows? **cmdtab** for Win
 - A hotkey to cycle apps (Chrome → Spotify → File Explorer)
 - A different hotkey to cycle windows (Chrome1 → Chrome2 → Chrome3)
 - Big readable app icons
-- Super lightweight program (<50kb)
+- Super lightweight program (~64kb)
+- Lots of tiny, useful QoL features—see below
 - Simple, clean, clear, commented C source code (easy to change/fix/extend by you/me/everyone!)
-- Lots of tiny, useful QoL features, like reverse, arrow keys & enter, cancel, ~~restore~~, mouse support, wrap bump, quit app, close window, ~~delayed show~~...
 - So fast!
-- The best macOS-style window switcher for Windows!
 - C!
+- The best macOS-style window switcher for Windows!
 
 ### Features
-The basics of window switching are easy to understand, but why is **cmdtab** *the best* macOS-style window switcher alternative for Windows? Because it packs so many tiny, useful features into such a small and lightweight package without bloat:
+So why is **cmdtab** *the best* macOS-style window switcher alternative for Windows? Because it packs so many useful features into such a small package without bloat:
 
-- Configurable hotkey to cycle apps (default Alt-Tab)
-- Configurable hotkey to cycle windows of the same app (default Alt-Tilde/Backquote)
+- Hotkey to cycle apps (Alt-Tab)
+- Hotkey to cycle windows of the same app (Alt-Tilde/Backquote)
 - Reverse direction by holding Shift
-- Arrow keys are supported (selects apps in switcher)
-- Enter key is supported (switches to selected window)
-- Mouse is supported (click an app icon to switch to that app)
-- Big readable app icons (not those tiny bewildering window previews)
-- Cancel and close the switcher by pressing Escape
-- Smart key capture so key presses don't unexpectedly bleed through to other apps
+- Can use Arrow Keys and Enter to select
+- Mouse support
+- Big readable app icons
+- Key presses don't unexpectedly bleed through to other apps
+- Cancel and hide the switcher by pressing Escape
+- Toggle app-grouping on/off (Alt-G)
 - Wrap bump is hard to explain but easy to feel: Try holding Alt-Tab until the end, then press Tab again—works in reverse, too!
 - Press Q to quit the selected app
 - Press W to close the selected window
-- ~~Option to return to the initial window when cancelling switcher by pressing Escape. This doesn't override or block Windows' native Alt-Escape hotkey~~
 - Press F4 while the switcher is open to quit **cmdtab**
 
 That's a lot of useful stuff, and the code is small! Go read it, and learn some C while you're at it.
@@ -48,21 +47,22 @@ That's a lot of useful stuff, and the code is small! Go read it, and learn some 
 There's no installation. Just download the [latest version](https://github.com/stianhoiland/cmdtab/releases/latest) from the Releases section, unzip, and run. 
 
 ### Run as administrator
-**cmdtab** cannot see elevated applications like Task Manager unless you "Run as administrator", but works well otherwise.
+**cmdtab** cannot see elevated applications like Task Manager unless you "Run as administrator", but also works well otherwise.
 
 ### Autorun
-**cmdtab** will prompt you about autorun when you launch it, but the autorun that **cmdtab** enables if you choose "Yes" is not "Run as administrator". In the future, **cmdtab** will support autorun as admin, but for now you must manually configure this by using the command below.
+**cmdtab** will prompt you about autorun when you launch it, but the autorun that you can enable with **cmdtab** is not "Run as administrator". In the future, **cmdtab** will support autorun ***as admin***, but for now you must manually configure this by using the command below.
 
 It makes sense to have **cmdtab** "Run as administrator", and it makes sense to have **cmdtab** autorun on login. Doing either is easy, but doing both, i.e. autorun as admin, is not so easy. The only way to autorun as admin is to use the Windows Task Scheduler. To create an appropriate scheduled task from the Command Prompt run this command:
 ```console
-schtasks /create /sc onlogon /rl highest /tn "cmdtab elevated autorun" /tr "C:\Users\%USERNAME%\Downloads\cmdtab-v1.6.2-win-x86_64\cmdtab.exe --autorun"
+schtasks /create /sc onlogon /rl highest /tn "cmdtab elevated autorun" /tr "C:\Users\%USERNAME%\Downloads\cmdtab-v1.7-win-x86_64\cmdtab.exe --autorun"
 ```
-You can further customize the scheduled task created by that command by running `taskschd.msc`.
+You can further customize the scheduled task created by that command by running `taskschd.msc` and looking for "cmdtab elevated autorun".
 
 ### Uninstalling
 **cmdtab** leaves no trace on your system, except for a registry key if you choose "Yes" when  **cmdtab** prompts you about autorun (and the scheduled task mentioned above if you manually created it). You can remove the autorun registry key by running **cmdtab** one last time before you delete `cmdtab.exe` and choose "No" to autorun.
 
 ## Buildling from source
+**cmdtab** comes with a `CMakeLists.txt` for building with `CMake` and a `Makefile` for building with `make`. I use `make`.
 
 #### MSVC/CMake
 These instructions require `git`, `cmake`, and *Visual Studio* or *MSBuild*.
@@ -75,7 +75,7 @@ These instructions require `git`, `cmake`, and *Visual Studio* or *MSBuild*.
 7. *(run cmdtab)* `build\MinSizeRel\cmdtab.exe`
 
 #### mingw-w64 GCC/make
-These instructions require `git`, `make`, `windres`, and `gcc`.
+These instructions require `git`, `make`, `windres`, and `gcc`. I use [w64devkit](https://github.com/skeeto/w64devkit).
 1. `git clone https://github.com/stianhoiland/cmdtab.git`
 2. `cd cmdtab`
 3. `make release`
