@@ -7,7 +7,7 @@ CFLAGS     = -std=c99
 WARNINGS   = -Wall -Wextra -pedantic -Wno-unused-parameter
 LDLIBS     = -lole32 -lcomctl32 -lgdi32 -lshlwapi -ldwmapi -lpathcch -lversion -lwinmm -lshcore
 
-GETVERSION = $$(sed -E -e 's,^[[:space:]]*VALUE "FileVersion"\,[[:space:]]*"(.*)"$$,\1,p;d' res/cmdtab.rc)
+GETVERSION = $$(sed -E -e 's,^[[:space:]]*VALUE "FileVersion"\,[[:space:]]*"(.*)"$$,\1,p;d' cmdtab.rc)
 
 PREFIX     = "C:/Users/$$USER/Downloads/cmdtab-v"$(GETVERSION)"-win-x86_64"
 

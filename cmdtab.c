@@ -348,7 +348,7 @@ static void LogWindow(handle hwnd)
 
 static string GetAppName(string *filepath)
 {
-	// Query version info for pretty application name. See cmdtab's own res/cmdtab.rc file for an idea of the data that is queried
+	// Query version info for pretty application name. See cmdtab's own cmdtab.rc file for an idea of the data that is queried
 
 	string name = {0};
 
